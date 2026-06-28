@@ -36,6 +36,19 @@ For development, keep state out of the checkout and use a separate port:
 CONTROL_CENTER_HOME=.dev-control-center PORT=3138 npm start
 ```
 
+## macOS Dock Launcher
+
+On macOS, Control Center can create a lightweight `.app` launcher that users can add to the Dock. This is not a separate native app; it starts or reuses the local Control Center server and opens the dashboard in the browser.
+
+```bash
+npm run macos-app
+open "Control Center.app"
+```
+
+After opening it once, drag `Control Center.app` to the Dock for quick access.
+
+The launcher keeps runtime state in `CONTROL_CENTER_HOME`, which defaults to `~/.control-center`, and logs startup details under `~/.control-center/logs/`.
+
 ## Runtime Layout
 
 App code stays in the Git checkout or release directory. User state is written to `CONTROL_CENTER_HOME`, which defaults to `~/.control-center`.
