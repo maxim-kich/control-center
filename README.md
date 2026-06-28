@@ -28,6 +28,8 @@ If you added `~/.control-center/bin` to `PATH`, the shorter start command also w
 control-center start
 ```
 
+The examples below use `~/.control-center/bin/control-center` so they work immediately after install, even before updating your shell `PATH`.
+
 For development, keep state out of the checkout and use a separate port:
 
 ```bash
@@ -77,8 +79,8 @@ Claude launches use generated hook settings under `CONTROL_CENTER_HOME` and stri
 Legacy Control Center databases can be imported without copying runtime files:
 
 ```bash
-control-center import --from /path/to/old/CONTROL_CENTER --source-provider claude
-control-center import --from /path/to/old/CONTROL_CENTER --source-provider codex
+~/.control-center/bin/control-center import --from /path/to/old/CONTROL_CENTER --source-provider claude
+~/.control-center/bin/control-center import --from /path/to/old/CONTROL_CENTER --source-provider codex
 ```
 
 The importer reads `data/tasks.db`, maps rows into the current schema, and does not copy `node_modules`, generated provider settings, uploads, auth artifacts, or `graphify-out`.
@@ -89,21 +91,21 @@ Release checks use GitHub releases. Configure the repository explicitly when the
 
 ```bash
 export CC_UPDATE_REPO=maxim-kich/control-center
-control-center check-updates
+~/.control-center/bin/control-center check-updates
 ```
 
 Settings -> General can check for updates, run an update dry-run, apply an update, and rollback when a rollback ref exists. Before replacing app code, the updater refuses dirty image-owned files, refuses extension conflicts by default, backs up config and the SQLite database, and runs migrations against a copied database:
 
 ```bash
-control-center update --dry-run
-control-center update
-control-center rollback
+~/.control-center/bin/control-center update --dry-run
+~/.control-center/bin/control-center update
+~/.control-center/bin/control-center rollback
 ```
 
 Development checkouts can pass a specific Git ref:
 
 ```bash
-control-center update --target v0.1.1 --dry-run
+~/.control-center/bin/control-center update --target v0.1.1 --dry-run
 ```
 
 Tagged pushes matching `v*` run the GitHub release workflow and attach the package artifact to the release after `npm run verify:release` passes.
