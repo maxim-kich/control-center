@@ -1,0 +1,46 @@
+{
+  "imageOwned": [
+    "server.js",
+    "bin/**",
+    "lib/**",
+    "public/**",
+    "scripts/**",
+    "tests/**",
+    "docs/**",
+    "examples/**",
+    "package.json",
+    "package-lock.json",
+    "README.md",
+    "AGENTS.md",
+    "control-center.manifest.json",
+    ".github/**"
+  ],
+  "instanceOwned": [
+    "~/.control-center/config.yaml",
+    "~/.control-center/data/**",
+    "~/.control-center/backups/**",
+    "~/.control-center/logs/**",
+    "~/.control-center/releases/**"
+  ],
+  "userOwned": [
+    "~/.control-center/extensions/**",
+    "${workspaceRoot}/**"
+  ],
+  "generated": [
+    "graphify-out/**",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/mcp.graph.*.json",
+    ".codex/hooks.json",
+    "node_modules/**",
+    "Control Center.app/**"
+  ],
+  "forbiddenForAgents": [
+    "data/tasks.db",
+    "*.db",
+    "*.db-wal",
+    "*.db-shm",
+    ".env",
+    ".env.*"
+  ]
+}

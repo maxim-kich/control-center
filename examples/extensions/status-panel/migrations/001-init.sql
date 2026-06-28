@@ -1,0 +1,2 @@
+-- Sample extension migration placeholder.
+-- Extension migrations are discovered for conflict checks but are not applied automatically.

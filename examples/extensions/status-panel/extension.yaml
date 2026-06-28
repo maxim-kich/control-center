@@ -1,0 +1,14 @@
+id: status-panel
+name: Status Panel
+version: 0.1.0
+description: Example extension showing a settings panel and a local API route.
+settingsPanels:
+  - id: status
+    title: Status
+    path: settings.html
+routes:
+  - path: status
+    method: GET
+migrations:
+  - id: status-panel-001
+    path: migrations/001-init.sql

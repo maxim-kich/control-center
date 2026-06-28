@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="/styles.css?v=publish-1" />
+</head>
+<body>
+  <!-- top navigation -->
+  <header class="topbar">
+    <div class="brand">
+      <h1>Control Center</h1>
+      <nav class="page-tabs" aria-label="Pages">
+        <button id="dashboardPageBtn" class="page-tab active" type="button" data-page="dashboard">Dashboard</button>
+        <button id="projectsPageBtn" class="page-tab" type="button" data-page="projects">Projects</button>
+        <button id="settingsPageBtn" class="page-tab" type="button" data-page="settings">Settings</button>
+      </nav>
+    </div>
+    <div class="topbar-actions">
+      <button id="notifyToggle" class="btn topbar-icon-btn notify-toggle" type="button" title="Turn on desktop notifications" aria-label="Turn on desktop notifications" hidden></button>
+      <button id="restartServerBtn" class="btn topbar-icon-btn restart-btn" type="button" title="Restart server" aria-label="Restart server">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+          <path d="M21 3v6h-6"/>
+        </svg>
+      </button>
+      <button id="quitServerBtn" class="btn topbar-icon-btn quit-btn" type="button" title="Quit Control Center" aria-label="Quit Control Center">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M12 3v9"/>
+          <path d="M6.1 7.8a8 8 0 1 0 11.8 0"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <section id="dashboardPage" class="page page-active" data-page-panel="dashboard">
+    <!-- sub panel (transparent strip) -->
+    <div class="subpanel">
+      <h2 class="subpanel-title">Tasks</h2>
+      <div class="subpanel-actions">
+        <label class="archive-toggle" title="Include archived tasks on the board">
+          <input type="checkbox" id="showArchive" /> Show archive
+        </label>
+        <select id="projectFilter" class="filter-select" title="Filter by project">
+          <option value="">All projects</option>
+        </select>
+        <button id="newTaskBtn" class="btn btn-primary">+ New task</button>
+      </div>
+    </div>
+
+    <main class="board-scroll">
+      <div class="board" id="board" data-board="dashboard">
+        <section class="column" data-status="backlog">
+          <h2 class="col-title">Backlog <span class="count" data-count="backlog">0</span></h2>
+          <div class="col-body" data-drop="backlog"></div>
+        </section>
+        <section class="column" data-status="in_progress">
+          <h2 class="col-title">In Progress <span class="count" data-count="in_progress">0</span></h2>
+          <div class="col-body" data-drop="in_progress"></div>
+        </section>
+        <section class="column" data-status="done">
+          <h2 class="col-title">Done <span class="count" data-count="done">0</span></h2>
+          <div class="col-body" data-drop="done"></div>
+        </section>
+      </div>
+    </main>
+  </section>
+
+  <section id="projectsPage" class="page" data-page-panel="projects" hidden>
+    <main class="projects-shell">
+      <aside class="projects-sidebar">
+        <div class="projects-sidebar-head">
+          <div class="projects-sidebar-title">
+            <span>Projects</span>
+            <span id="projectListCount" class="count">0</span>
+          </div>
+          <button id="newProjectBtn" class="btn btn-primary btn-sm project-new-btn" type="button">
+            <span aria-hidden="true">+</span>
+            <span>New</span>
+          </button>
+        </div>
+        <div id="projectList" class="project-list"></div>
+      </aside>
+      <section class="project-canvas">
+        <header class="project-canvas-head">
+          <div class="project-canvas-main">
+            <h3 id="selectedProjectTitle">Projects</h3>
+            <div id="selectedProjectPath" class="project-path-line"></div>
+            <p id="selectedProjectDescription" class="project-desc-line"></p>
+          </div>
+          <div class="project-canvas-actions">
+            <label class="archive-toggle" title="Include archived tasks on this project board">
+              <input type="checkbox" id="projectShowArchive" /> Show archive
+            </label>
+            <button id="projectMediaBtn" class="btn btn-sm" type="button" disabled>Media</button>
+            <button id="editProjectBtn" class="btn btn-sm" type="button" disabled>✎ Edit</button>
+            <button id="newProjectTaskBtn" class="btn btn-primary btn-sm" type="button" disabled>+ New task</button>
+          </div>
+        </header>
+        <div class="board-scroll project-board-scroll">
+          <div class="board" id="projectBoard" data-board="project">
+            <section class="column" data-status="backlog">
+              <h2 class="col-title">Backlog <span class="count" data-count="backlog">0</span></h2>
+              <div class="col-body" data-drop="backlog"></div>
+            </section>
+            <section class="column" data-status="in_progress">
+              <h2 class="col-title">In Progress <span class="count" data-count="in_progress">0</span></h2>
+              <div class="col-body" data-drop="in_progress"></div>
+            </section>
+            <section class="column" data-status="done">
+              <h2 class="col-title">Done <span class="count" data-count="done">0</span></h2>
+              <div class="col-body" data-drop="done"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </section>
+
+  <section id="settingsPage" class="page" data-page-panel="settings" hidden>
+    <main class="settings-shell">
+      <aside class="settings-sidebar">
+        <div class="projects-sidebar-head">
+          <div class="projects-sidebar-title">
+            <span>Settings</span>
+            <span id="settingsListCount" class="count">2</span>
+          </div>
+        </div>
+        <div class="settings-list">
+          <button class="settings-row active" type="button" data-settings-section="general">
+            <span class="settings-row-main">
+              <span class="project-row-title"><span>General</span></span>
+              <span class="project-row-path">Server behavior</span>
+            </span>
+          </button>
+          <button class="settings-row" type="button" data-settings-section="models">
+            <span class="settings-row-main">
+              <span class="project-row-title"><span>Models</span></span>
+              <span class="project-row-path">CLI providers</span>
+            </span>
+          </button>
+          <button class="settings-row" type="button" data-settings-section="extensions">
+            <span class="settings-row-main">
+              <span class="project-row-title"><span>Extensions</span></span>
+              <span class="project-row-path">User-owned add-ons</span>
+            </span>
+          </button>
+        </div>
+      </aside>
+      <section class="settings-canvas" data-settings-panel="general">
+        <header class="project-canvas-head">
+          <div class="project-canvas-main">
+            <h3>General</h3>
+          </div>
+        </header>
+        <div class="settings-section-head">
+          <h4>Server</h4>
+        </div>
+        <div class="settings-options">
+          <label class="settings-toggle" title="Keep macOS awake while Control Center is running">
+            <input type="checkbox" id="caffeinateToggle" />
+            <span class="settings-toggle-main">
+              <span class="settings-toggle-title">Caffeinate</span>
+              <span id="caffeinateStatus" class="settings-toggle-note">Checking status...</span>
+            </span>
+          </label>
+        </div>
+        <div class="settings-section-head">
+          <h4>Version</h4>
+        </div>
+        <div id="versionGrid" class="settings-kv-grid"></div>
+        <div class="settings-actions" id="versionActions">
+          <button id="checkUpdatesBtn" class="btn btn-sm" type="button">Check for updates</button>
+          <button id="dryRunUpdateBtn" class="btn btn-sm" type="button">Dry run</button>
+          <button id="applyUpdateBtn" class="btn btn-sm primary" type="button">Update</button>
+          <button id="rollbackUpdateBtn" class="btn btn-sm" type="button">Rollback</button>
+          <span id="versionStatus" class="settings-toggle-note">Update status unavailable</span>
+        </div>
+      </section>
+      <section class="settings-canvas" data-settings-panel="models" hidden>
+        <header class="project-canvas-head">
+          <div class="project-canvas-main">
+            <h3>Models</h3>
+            <div id="modelsSummary" class="project-path-line">Checking model CLIs...</div>
+          </div>
+          <div class="project-canvas-actions">
+            <button id="refreshModelsBtn" class="btn btn-sm" type="button">Refresh</button>
+          </div>
+        </header>
+        <div class="settings-section-head">
+          <h4>Providers</h4>
+        </div>
+        <div id="modelProviderGrid" class="model-provider-grid"></div>
+      </section>
+      <section class="settings-canvas" data-settings-panel="extensions" hidden>
+        <header class="project-canvas-head">
+          <div class="project-canvas-main">
+            <h3>Extensions</h3>
+            <div id="extensionsSummary" class="project-path-line">Checking extensions...</div>
+          </div>
+          <div class="project-canvas-actions">
+            <button id="refreshExtensionsBtn" class="btn btn-sm" type="button">Refresh</button>
+          </div>
+        </header>
+        <div class="settings-section-head">
+          <h4>Installed</h4>
+        </div>
+        <div id="extensionGrid" class="extension-grid"></div>
+        <div class="settings-section-head">
+          <h4>Conflicts</h4>
+        </div>
+        <div id="extensionConflictList" class="extension-conflict-list"></div>
+      </section>
+    </main>
+  </section>
+
+  <!-- New / edit task dialog -->
+  <div class="modal-overlay" id="taskModal" hidden>
+    <div class="modal modal-sm">
+      <header class="modal-head">
+        <h3 id="taskModalTitle">New task</h3>
+        <button class="icon-btn" data-close="taskModal">✕</button>
+      </header>
+      <form id="taskForm" class="form">
+        <input type="hidden" id="taskId" />
+        <label>Title
+          <input type="text" id="f_title" required placeholder="Fix the login redirect bug" />
+        </label>
+
+        <!-- project: custom dropdown populated from user-created projects -->
+        <div class="field-label">Project <span class="hint" id="projectHint"></span></div>
+        <div class="project-picker" id="projectPicker">
+          <button type="button" class="project-trigger" id="projectTrigger">
+            <span id="projectTriggerLabel">Select a project…</span>
+            <span class="caret">▾</span>
+          </button>
+          <div class="project-menu" id="projectMenu" hidden></div>
+        </div>
+        <div class="project-manual" id="projectManual" hidden>
+          <input type="text" id="f_projectPath" placeholder="/absolute/path or ~/path" spellcheck="false" autocomplete="off" />
+        </div>
+        <button type="button" class="link-btn" id="projectManualToggle" hidden>Enter a path manually</button>
+        <input type="hidden" id="f_project" />
+
+        <label>Description <span class="hint">— added after the title in the opening prompt</span>
+          <textarea id="f_description" rows="4" placeholder="Add details, constraints, or acceptance criteria..."></textarea>
+        </label>
+
+        <!-- context files -> copied into <project>/USER_UPLOADS -->
+        <div class="field-label">Context files <span class="hint">— copied into the project's USER_UPLOADS</span></div>
+        <div class="upload-row">
+          <label class="btn btn-sm file-picker-label" id="f_uploadBtn" for="f_uploadInput">＋ Add files</label>
+          <input type="file" id="f_uploadInput" class="file-picker-input" multiple />
+          <span class="upload-note" id="f_uploadNote"></span>
+        </div>
+        <div class="upload-list" id="f_uploadList"></div>
+
+        <label class="field">Model
+          <select id="f_model">
+            <option value="gpt-5.5" selected>GPT-5.5</option>
+            <option value="gpt-5.4">GPT-5.4</option>
+            <option value="gpt-5.4-mini">GPT-5.4 mini</option>
+            <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
+          </select>
+        </label>
+
+        <label class="field effort-field">
+          <span class="effort-head">Effort <span class="effort-val" id="effortLabel">Medium</span></span>
+          <input type="range" id="f_effort" min="0" max="3" step="1" value="1" />
+        </label>
+
+        <div class="field-label">Mode</div>
+        <div class="mode-cards" id="modeCards">
+          <label class="mode-card">
+            <input type="radio" name="f_mode" value="build" checked />
+            <span class="mode-card-title">Build</span>
+            <span class="mode-card-desc">Acts directly</span>
+          </label>
+          <label class="mode-card" data-provider-mode="auto">
+            <input type="radio" name="f_mode" value="auto" />
+            <span class="mode-card-title">Auto</span>
+            <span class="mode-card-desc">Classifier decides</span>
+          </label>
+          <label class="mode-card">
+            <input type="radio" name="f_mode" value="plan" />
+            <span class="mode-card-title">Plan</span>
+            <span class="mode-card-desc">Reviews before acting</span>
+          </label>
+        </div>
+
+        <label class="checkbox yolo-line" title="Bypass approvals and sandbox (--dangerously-bypass-approvals-and-sandbox)">
+          <input type="checkbox" id="f_yolo" checked /> YOLO <span class="hint">(full permissions — no prompts)</span>
+        </label>
+
+        <label class="checkbox yolo-line" title="Legacy setting kept for old tasks. No Codex equivalent is wired yet.">
+          <input type="checkbox" id="f_ultracode" /> Ultracode <span class="hint">(legacy no-op)</span>
+        </label>
+
+        <div class="form-actions">
+          <button type="button" class="btn" data-close="taskModal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- New / edit project dialog -->
+  <div class="modal-overlay" id="projectModal" hidden>
+    <div class="modal modal-sm">
+      <header class="modal-head">
+        <h3 id="projectModalTitle">New project</h3>
+        <button class="icon-btn" data-close="projectModal">✕</button>
+      </header>
+      <form id="projectForm" class="form">
+        <input type="hidden" id="projectId" />
+        <label>Name
+          <input type="text" id="p_name" placeholder="Control Center" />
+        </label>
+        <label>Path
+          <input type="text" id="p_path" required placeholder="/absolute/path or ~/path" spellcheck="false" autocomplete="off" />
+        </label>
+        <label>Description
+          <textarea id="p_description" rows="3" placeholder="Small project description..."></textarea>
+        </label>
+        <label class="checkbox yolo-line" title="Install project-scoped Graphify for Codex and refresh the code graph automatically.">
+          <input type="checkbox" id="p_graphify" checked /> Graphify <span class="hint">(auto-update code graph)</span>
+        </label>
+        <label class="checkbox yolo-line" title="Initialize a Git repository in the project folder when saved.">
+          <input type="checkbox" id="p_git" /> Git <span class="hint">(create repository)</span>
+        </label>
+        <div class="form-actions">
+          <div class="form-danger-actions" id="projectDangerActions" hidden>
+            <button type="button" class="btn btn-ghost" id="archiveProjectBtn">Archive</button>
+            <button type="button" class="btn btn-danger" id="deleteProjectBtn">Delete</button>
+          </div>
+          <button type="button" class="btn" data-close="projectModal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Task details -->
+  <div class="modal-overlay" id="detailsModal" hidden>
+    <div class="modal modal-lg details-modal">
+      <header class="modal-head">
+        <div class="modal-head-main">
+          <h3 id="dTitle">Task</h3>
+          <div class="conv-meta" id="dMeta"></div>
+        </div>
+        <button class="icon-btn" data-close="detailsModal">✕</button>
+      </header>
+      <div class="details-scroll" id="dBody"></div>
+      <footer class="details-bar" id="dBar"></footer>
+    </div>
+  </div>
+
+  <!-- Media browser -->
+  <div class="modal-overlay" id="mediaModal" hidden>
+    <div class="modal modal-md">
+      <header class="modal-head">
+        <div class="modal-head-main">
+          <h3>Media</h3>
+          <div class="conv-meta" id="mediaSub">USER_UPLOADS</div>
+        </div>
+        <div class="modal-head-actions">
+          <label class="btn btn-sm file-picker-label" id="mediaUploadBtn" for="mediaUploadInput">⤒ Upload</label>
+          <input type="file" id="mediaUploadInput" class="file-picker-input" multiple />
+          <button class="icon-btn" data-close="mediaModal">✕</button>
+        </div>
+      </header>
+      <div class="media-grid" id="mediaGrid"></div>
+      <footer class="media-foot">
+        <span class="media-count" id="mediaCount">0 selected</span>
+        <div class="media-foot-actions">
+          <button class="btn btn-sm" id="mediaClose" data-close="mediaModal">Cancel</button>
+          <button class="btn btn-primary btn-sm" id="mediaAdd" disabled>Add to context</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Tabbed terminal drawer -->
+  <div class="drawer" id="drawer" hidden>
+    <div class="drawer-resize" id="drawerResize" title="Drag to resize the terminal"></div>
+    <div class="tabbar" id="tabBar">
+      <div class="tabs" id="tabList"></div>
+      <button class="icon-btn chevron" id="drawerChevron" title="Collapse / expand terminal">▾</button>
+    </div>
+    <div class="tabdetail" id="tabDetail">
+      <div class="td-info">
+        <span class="td-path" id="tdPath"></span>
+        <span class="td-metric" id="tdTokens" title="Tokens in / out">—</span>
+        <span class="td-metric" id="tdContext" title="Context window usage">—</span>
+        <span class="td-chip" id="tdModel"></span>
+        <span class="td-chip" id="tdEffort"></span>
+      </div>
+      <div class="td-actions">
+        <button id="tdMedia" class="btn btn-sm" title="Browse / upload project media">🖼 Media</button>
+        <button id="termDone" class="btn btn-primary btn-sm" title="Mark this task Done and end the session">✓ Done</button>
+      </div>
+    </div>
+    <div class="term-area" id="termArea"></div>
+  </div>
+
+  <script src="/vendor/xterm/lib/xterm.js"></script>
+  <script src="/vendor/addon-fit/lib/addon-fit.js"></script>
+  <script src="/app.js?v=publish-1"></script>
+</body>
+</html>

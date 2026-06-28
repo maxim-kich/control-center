@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+CONTROL_CENTER_HOME="${CONTROL_CENTER_HOME:-${HOME}/.control-center}"
+BIN_DIR="${CONTROL_CENTER_HOME}/bin"
+PORT="${PORT:-3137}"
+
+if ! command -v node >/dev/null 2>&1; then
+  printf 'Node.js 18 or newer is required. Install Node.js, then rerun ./scripts/install.\n' >&2
+  exit 1
+fi
+
+NODE_MAJOR="$(node -p "Number(process.versions.node.split('.')[0])")"
+if [ "$NODE_MAJOR" -lt 18 ]; then
+  printf 'Node.js 18 or newer is required; found %s.\n' "$(node -v)" >&2
+  exit 1
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  printf 'npm is required. Install npm, then rerun ./scripts/install.\n' >&2
+  exit 1
+fi
+
+mkdir -p \
+  "${CONTROL_CENTER_HOME}/data" \
+  "${CONTROL_CENTER_HOME}/backups" \
+  "${CONTROL_CENTER_HOME}/extensions" \
+  "${CONTROL_CENTER_HOME}/releases" \
+  "${CONTROL_CENTER_HOME}/logs" \
+  "$BIN_DIR"
+
+if [ ! -f "${CONTROL_CENTER_HOME}/config.yaml" ]; then
+  cat > "${CONTROL_CENTER_HOME}/config.yaml" <<'YAML'
+# Control Center instance configuration
+update_channel: stable
+YAML
+fi
+
+cd "$ROOT"
+npm install --omit=dev
+chmod +x "$ROOT/bin/control-center.js"
+ln -sf "$ROOT/bin/control-center.js" "$BIN_DIR/control-center"
+
+printf 'Installed Control Center.\n\n'
+printf 'Start now:\n  "%s/control-center" start\n\n' "$BIN_DIR"
+printf 'Then open:\n  http://127.0.0.1:%s\n\n' "$PORT"
+
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *)
+    printf 'Optional: add this to PATH so `control-center` works in new shells:\n  export PATH="%s:$PATH"\n\n' "$BIN_DIR"
+    ;;
+esac
