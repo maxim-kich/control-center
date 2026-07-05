@@ -430,6 +430,14 @@ body {
   gap: 6px;
 }
 .project-row-title > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-attention-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--amber);
+  box-shadow: 0 0 6px rgba(210, 153, 34, 0.75);
+}
 .project-row-path { font-family: var(--mono); font-size: 10.5px; color: var(--muted-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-row-count {
   flex: 0 0 auto;

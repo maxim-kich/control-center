@@ -1661,6 +1661,14 @@ function projectTaskCount(projectPath) {
   return taskSource().filter((t) => t.project_path === projectPath).length;
 }
 
+function projectNeedsAttention(projectPath) {
+  return taskSource().some((t) => (
+    t.project_path === projectPath &&
+    !t.archived &&
+    t.displayStatus === 'needs_attention'
+  ));
+}
+
 function selectProjectPage(id) {
   selectedProjectId = id;
   renderBoard();
@@ -1688,6 +1696,9 @@ function renderProjectsPage() {
           h('span', { class: 'project-row-main' },
             h('span', { class: 'project-row-title' },
               h('span', {}, p.name || displayProject(p.path)),
+              projectNeedsAttention(p.path)
+                ? h('span', { class: 'project-attention-dot', title: 'A task needs attention' })
+                : null,
             ),
             h('span', { class: 'project-row-path' }, p.path),
           ),
