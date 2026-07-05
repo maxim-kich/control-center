@@ -368,6 +368,13 @@ function renderGraphifyPill(project, opts) {
   }, label);
 }
 
+function renderProjectHeaderBadges(project) {
+  return [
+    project && project.git_initialized ? h('span', { class: 'project-git-badge project-git-badge-lg', title: 'Git repository' }, 'Git') : null,
+    renderGraphifyPill(project, { action: true }),
+  ].filter(Boolean);
+}
+
 async function refresh(force) {
   try {
     const data = await api.get('/api/tasks');
@@ -1874,8 +1881,7 @@ function renderProjectsPage() {
   if (project) {
     title.append(
       h('span', { class: 'project-title-text' }, project.name || displayProject(project.path)),
-      project.git_initialized ? h('span', { class: 'project-git-badge project-git-badge-lg', title: 'Git repository' }, 'Git') : null,
-      renderGraphifyPill(project, { action: true }),
+      ...renderProjectHeaderBadges(project),
     );
   } else {
     title.textContent = 'No projects';
