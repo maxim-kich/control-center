@@ -2542,7 +2542,7 @@ $('#quitServerBtn').addEventListener('click', quitServer);
 // Real OS-level notifications (Web Notifications API) so a task that needs the user's eyes is
 // visible from any app — not just when the dashboard tab is in front. We fire on each transition
 // INTO a notify-worthy state by diffing displayStatus against the previous 2.5s poll:
-//   • needs_attention — Codex finished a turn / is idle and waiting for input
+//   • needs_attention — provider finished a turn / is idle and waiting for input
 //   • done            — the task completed
 // Dashboard is served from localhost / 127.0.0.1, which Chrome treats as a secure context, so the
 // Notification API is available here without HTTPS.
@@ -2550,10 +2550,20 @@ const NOTIFY_KEY = 'dashboard.notify';
 const OLD_NOTIFY_KEY = 'planora.notify';
 migrateStorageKey(OLD_NOTIFY_KEY, NOTIFY_KEY);
 const NOTIFY_STATES = {
-  needs_attention: { verb: 'Needs attention', blurb: 'Codex is waiting for you', sticky: true },
+  needs_attention: { verb: 'Needs attention', sticky: true },
   done: { verb: 'Done', blurb: 'task complete', sticky: false },
 };
 const NOTIFY_ICON = new URL('/notification-icon.png', window.location.href).href;
+
+function notificationProviderName(t) {
+  const providers = MODEL_CONNECTIONS.providers || [];
+  const taskProvider = t && t.provider
+    ? providers.find((p) => p.id === t.provider)
+    : null;
+  const provider = taskProvider || providers.find((p) => p.active);
+  const name = provider && String(provider.name || provider.id || '').trim();
+  return name || 'The task';
+}
 
 function notificationTaskTitle(t) {
   const text = String(t.title || '').replace(/\s+/g, ' ').trim();
@@ -2662,7 +2672,7 @@ const notifier = {
       const before = this.prev.get(t.id);
       this.prev.set(t.id, ds);
       // Retract a still-open banner once the task leaves the state it was raised for, so a sticky
-      // "Codex is waiting for you" can't linger after Codex has resumed (or the task finished).
+      // "is waiting for you" notification can't linger after the provider resumes (or the task finished).
       if (before && before !== ds && NOTIFY_STATES[before]) this.dismiss(t.id);
       if (!this.seeded || before === undefined) continue; // baseline (or first sight of a task)
       if (ds === before || !NOTIFY_STATES[ds] || !this.enabled) continue;
@@ -2703,7 +2713,7 @@ const notifier = {
     const meta = NOTIFY_STATES[ds];
     const proj = displayProject(t.project_path);
     if (ds === 'needs_attention') {
-      this.show(meta.blurb, proj ? `${proj} — ${notificationTaskTitle(t)}` : notificationTaskTitle(t), {
+      this.show(`${notificationProviderName(t)} is waiting for you`, proj ? `${proj} — ${notificationTaskTitle(t)}` : notificationTaskTitle(t), {
         tag: 'dashboard-task-' + t.id,
         sticky: meta.sticky,
         taskId: t.id,
