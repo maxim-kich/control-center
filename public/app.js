@@ -147,7 +147,9 @@ let updateCheckSaving = false;
 let updateActionSaving = null;
 let archivedCache = [];
 let tabsRestored = false; // one-shot guard: re-open live terminals on the first page load
-const OPEN_TABS_KEY = 'dashboard.openTabs'; // persisted { ids, activeId } for the terminal tabs
+let uiStateRestoring = false;
+const UI_STATE_KEY = 'dashboard.uiState'; // sessionStorage { bootId, state }
+const OPEN_TABS_KEY = 'dashboard.openTabs'; // localStorage { bootId, ids, activeId } for live terminal tabs
 const OLD_OPEN_TABS_KEY = 'planora.openTabs';
 const BOARD_RENDER_SETTLE_MS = 180;
 const TERMINAL_WRITE_CHUNK = 64 * 1024;
@@ -170,6 +172,127 @@ function migrateStorageKey(oldKey, newKey) {
   }
 }
 migrateStorageKey(OLD_OPEN_TABS_KEY, OPEN_TABS_KEY);
+
+function safeJsonParse(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function storageBootMatches(payload) {
+  return !!(payload && currentBootId && payload.bootId === currentBootId);
+}
+
+function clearStaleBootStorage() {
+  try {
+    const ui = safeJsonParse(sessionStorage.getItem(UI_STATE_KEY));
+    if (ui && currentBootId && ui.bootId !== currentBootId) sessionStorage.removeItem(UI_STATE_KEY);
+  } catch {
+    /* storage unavailable — best-effort */
+  }
+  try {
+    const openTabs = safeJsonParse(localStorage.getItem(OPEN_TABS_KEY));
+    if (openTabs && currentBootId && openTabs.bootId !== currentBootId) localStorage.removeItem(OPEN_TABS_KEY);
+  } catch {
+    /* storage unavailable — best-effort */
+  }
+}
+
+function projectSectionKey(el) {
+  return el.dataset.projectSection || el.id || el.getAttribute('aria-controls') || '';
+}
+
+function collapsedProjectSections() {
+  const ids = [];
+  for (const el of document.querySelectorAll('[data-project-section]')) {
+    const id = projectSectionKey(el);
+    if (!id) continue;
+    const collapsed = el.tagName === 'DETAILS'
+      ? !el.open
+      : el.classList.contains('collapsed') || el.getAttribute('aria-expanded') === 'false';
+    if (collapsed) ids.push(id);
+  }
+  return ids;
+}
+
+function applyCollapsedProjectSections(ids) {
+  const collapsed = new Set(Array.isArray(ids) ? ids : []);
+  for (const el of document.querySelectorAll('[data-project-section]')) {
+    const id = projectSectionKey(el);
+    if (!id) continue;
+    const isCollapsed = collapsed.has(id);
+    if (el.tagName === 'DETAILS') el.open = !isCollapsed;
+    else {
+      el.classList.toggle('collapsed', isCollapsed);
+      if (el.hasAttribute('aria-expanded')) el.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+    }
+  }
+}
+
+function persistedUiState() {
+  return {
+    page: currentPage,
+    selectedProjectId,
+    settingsSection: currentSettingsSection,
+    projectFilter,
+    showArchive,
+    collapsedProjectSections: collapsedProjectSections(),
+  };
+}
+
+function persistUiState() {
+  if (uiStateRestoring || !currentBootId) return;
+  try {
+    sessionStorage.setItem(UI_STATE_KEY, JSON.stringify({ bootId: currentBootId, state: persistedUiState() }));
+  } catch {
+    /* storage unavailable — best-effort */
+  }
+}
+
+function restoreUiStateForBoot() {
+  if (!currentBootId) return false;
+  clearStaleBootStorage();
+  let saved = null;
+  try {
+    saved = safeJsonParse(sessionStorage.getItem(UI_STATE_KEY));
+  } catch {
+    return false;
+  }
+  if (!storageBootMatches(saved) || !saved.state) return false;
+  const state = saved.state;
+  uiStateRestoring = true;
+  currentPage = ['dashboard', 'projects', 'settings'].includes(state.page) ? state.page : currentPage;
+  currentSettingsSection = ['general', 'models', 'extensions'].includes(state.settingsSection) ? state.settingsSection : currentSettingsSection;
+  selectedProjectId = state.selectedProjectId || selectedProjectId;
+  projectFilter = typeof state.projectFilter === 'string' ? state.projectFilter : projectFilter;
+  showArchive = !!state.showArchive;
+  requestAnimationFrame(() => applyCollapsedProjectSections(state.collapsedProjectSections));
+  uiStateRestoring = false;
+  return true;
+}
+
+function showRestoreLoading(step) {
+  const overlay = $('#restoreLoading');
+  if (!overlay) return;
+  document.body.classList.add('restore-loading-active');
+  overlay.hidden = false;
+  restoreLoadingStep(step || 'Restoring workspace...');
+}
+
+function restoreLoadingStep(step) {
+  const text = $('#restoreLoadingStep');
+  if (text) text.textContent = step || 'Restoring workspace...';
+}
+
+function hideRestoreLoading() {
+  const overlay = $('#restoreLoading');
+  document.body.classList.remove('restore-loading-active');
+  if (!overlay) return;
+  overlay.hidden = true;
+}
 
 function relPath(p) {
   if (workspaceRoot && p && p.startsWith(workspaceRoot + '/')) return p.slice(workspaceRoot.length + 1);
@@ -1101,8 +1224,9 @@ const tabs = {
 
   // Persist which tabs are open + which is active so a page reload can restore them.
   persist() {
+    if (!currentBootId) return;
     try {
-      localStorage.setItem(OPEN_TABS_KEY, JSON.stringify({ ids: [...this.map.keys()], activeId: this.activeId }));
+      localStorage.setItem(OPEN_TABS_KEY, JSON.stringify({ bootId: currentBootId, ids: [...this.map.keys()], activeId: this.activeId }));
     } catch {
       /* storage unavailable — best-effort */
     }
@@ -1336,22 +1460,28 @@ function openTab(task) {
 // so we never silently relaunch one). Tab order + the active tab come from localStorage when set.
 function restoreOpenTabs() {
   tabsRestored = true;
+  restoreLoadingStep('Reconnecting live terminal tabs...');
   const liveById = new Map(TASKS.filter((t) => t.live).map((t) => [t.id, t]));
   if (!liveById.size) return;
   let saved = { ids: [], activeId: null };
   try {
-    const v = JSON.parse(localStorage.getItem(OPEN_TABS_KEY) || '{}') || {};
+    const v = safeJsonParse(localStorage.getItem(OPEN_TABS_KEY));
+    if (!storageBootMatches(v)) {
+      if (v) localStorage.removeItem(OPEN_TABS_KEY);
+      return;
+    }
     saved = { ids: Array.isArray(v.ids) ? v.ids : [], activeId: v.activeId || null };
   } catch {
     /* ignore malformed state */
   }
-  // Honour the saved order for tabs still live, then append any other live sessions.
+  // Honour the saved order for tabs still live. Do not open non-live tasks: reconnecting must
+  // attach to existing PTYs only, never resume a previous session after a server restart.
   const ordered = [];
   const seen = new Set();
   for (const id of saved.ids) {
     if (liveById.has(id) && !seen.has(id)) { ordered.push(liveById.get(id)); seen.add(id); }
   }
-  for (const [id, t] of liveById) if (!seen.has(id)) ordered.push(t);
+  if (!ordered.length) return;
   for (const t of ordered) tabs.open(t);
   const activeId = saved.activeId && liveById.has(saved.activeId) ? saved.activeId : ordered[ordered.length - 1].id;
   tabs.activate(activeId);
@@ -1623,6 +1753,7 @@ function setPage(page) {
   renderGeneralSettings();
   renderModelsSection();
   renderExtensionsSection();
+  persistUiState();
 }
 
 $('#dashboardPageBtn').addEventListener('click', () => setPage('dashboard'));
@@ -1655,6 +1786,7 @@ async function setShowArchive(checked) {
   else { archivedCache = []; rebuildIndex(); }
   renderBoard();
   syncProjectFilter();
+  persistUiState();
 }
 
 $('#showArchive').addEventListener('change', () => setShowArchive($('#showArchive').checked));
@@ -1667,8 +1799,11 @@ function syncProjectFilter() {
     .sort((a, b) => displayProject(a).localeCompare(displayProject(b)));
   const want = [['', 'All projects'], ...paths.map((p) => [p, displayProject(p)])];
   const have = [...sel.options].map((o) => [o.value, o.textContent]);
-  if (JSON.stringify(want) === JSON.stringify(have)) return;
-  const current = sel.value;
+  if (JSON.stringify(want) === JSON.stringify(have)) {
+    if (sel.value !== projectFilter && want.some(([v]) => v === projectFilter)) sel.value = projectFilter;
+    return;
+  }
+  const current = projectFilter || sel.value;
   sel.replaceChildren(...want.map(([v, label]) => h('option', { value: v }, label)));
   sel.value = want.some(([v]) => v === current) ? current : '';
   projectFilter = sel.value;
@@ -1676,6 +1811,7 @@ function syncProjectFilter() {
 $('#projectFilter').addEventListener('change', () => {
   projectFilter = $('#projectFilter').value;
   renderBoard();
+  persistUiState();
 });
 
 /* -------------------------------------------------------- project page */
@@ -1695,6 +1831,7 @@ function projectNeedsAttention(projectPath) {
 function selectProjectPage(id) {
   selectedProjectId = id;
   renderBoard();
+  persistUiState();
 }
 
 function renderProjectsPage() {
@@ -1763,6 +1900,7 @@ function setSettingsSection(section, opts) {
   renderModelsSection();
   renderExtensionsSection();
   if (currentPage === 'settings' && opts.load !== false) loadCurrentSettingsSection();
+  persistUiState();
 }
 
 function loadCurrentSettingsSection() {
@@ -2621,13 +2759,47 @@ const notifier = {
   },
 };
 
+document.addEventListener('toggle', (ev) => {
+  if (ev.target && ev.target.matches && ev.target.matches('[data-project-section]')) persistUiState();
+}, true);
+window.addEventListener('beforeunload', persistUiState);
+
 /* ----------------------------------------------------------------- boot */
 
-notifier.init();
-loadHealth();
-loadModelConnections();
-loadProjects();
-refresh(true);
+async function init() {
+  showRestoreLoading('Checking server boot...');
+  notifier.init();
+  await loadHealth();
+  restoreUiStateForBoot();
+  restoreLoadingStep('Loading projects...');
+  await loadProjects();
+  if (showArchive) {
+    restoreLoadingStep('Loading archived tasks...');
+    await loadArchived();
+  }
+  syncArchiveToggles();
+  try {
+    const saved = safeJsonParse(sessionStorage.getItem(UI_STATE_KEY));
+    applyCollapsedProjectSections(saved && saved.state && saved.state.collapsedProjectSections);
+  } catch {
+    /* storage unavailable — best-effort */
+  }
+  setPage(currentPage);
+  restoreLoadingStep('Loading tasks...');
+  await refresh(true);
+  restoreLoadingStep('Workspace restored');
+  persistUiState();
+  setTimeout(hideRestoreLoading, 260);
+  loadModelConnections();
+}
+
+init().catch((e) => {
+  hideRestoreLoading();
+  toast('Startup failed: ' + e.message, { err: true });
+  loadModelConnections();
+  loadProjects();
+  refresh(true);
+});
 setInterval(() => {
   if ($('#taskModal').hidden && $('#detailsModal').hidden && $('#mediaModal').hidden) refresh();
   else tabs.sync();

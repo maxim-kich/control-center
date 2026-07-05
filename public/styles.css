@@ -42,6 +42,54 @@ body {
   overflow: hidden;
 }
 
+body.restore-loading-active > :not(.restore-loading) {
+  filter: blur(7px);
+  transform: scale(1.006);
+  pointer-events: none;
+  user-select: none;
+}
+
+.restore-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 17, 23, 0.56);
+  backdrop-filter: blur(12px) saturate(1.08);
+}
+
+.restore-loading-panel {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  color: var(--text);
+}
+
+.restore-loading-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid rgba(230, 237, 243, 0.22);
+  border-top-color: var(--accent-2);
+  animation: restore-loading-spin 0.85s linear infinite;
+}
+
+.restore-loading-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+@keyframes restore-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .restore-loading-spinner { animation: none; }
+}
+
 /* ---------- top bar ---------- */
 .topbar {
   flex: 0 0 auto;
