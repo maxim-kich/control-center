@@ -221,6 +221,62 @@ test('projects can be archived, restored, and deleted without deleting tasks', (
   db.db.close();
 });
 
+test('unstarted backlog tasks can be permanently deleted with related rows cleaned up', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-task-delete-'));
+  const db = loadDb(path.join(tmp, 'tasks.db'));
+  const projectPath = path.join(tmp, 'project');
+
+  const parent = db.createTask({
+    title: 'delete me',
+    project_path: projectPath,
+  });
+  const child = db.createTask({
+    title: 'detach me',
+    project_path: projectPath,
+    parent_task_id: parent.id,
+    parent_session_id: 'parent-session',
+  });
+
+  db.db.exec(`CREATE TABLE task_release_memberships (task_id TEXT NOT NULL, release_id TEXT NOT NULL)`);
+  db.db.prepare(`INSERT INTO task_release_memberships (task_id, release_id) VALUES (?, ?)`).run(parent.id, 'release-1');
+  db.upsertSession({ session_id: 'stale-session', task_id: parent.id, kind: 'start' });
+
+  assert.equal(db.canDeleteTask(parent), true);
+  const deleted = db.deleteTask(parent.id);
+
+  assert.equal(deleted.id, parent.id);
+  assert.equal(db.getTask(parent.id), undefined);
+  assert.equal(db.getSession('stale-session'), undefined);
+  assert.equal(db.db.prepare(`SELECT COUNT(*) AS n FROM task_release_memberships WHERE task_id = ?`).get(parent.id).n, 0);
+
+  const detached = db.getTask(child.id);
+  assert.equal(detached.parent_task_id, null);
+  assert.equal(detached.parent_session_id, null);
+
+  db.db.close();
+});
+
+test('started archived and non-backlog tasks remain archive-only', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-task-delete-guard-'));
+  const db = loadDb(path.join(tmp, 'tasks.db'));
+
+  const started = db.createTask({ title: 'started', project_path: tmp });
+  db.updateTask(started.id, { started_at: db.now() });
+  const withSession = db.createTask({ title: 'session', project_path: tmp });
+  db.updateTask(withSession.id, { session_id: 'sess-1' });
+  const inProgress = db.createTask({ title: 'working', project_path: tmp, status: 'in_progress' });
+  const archived = db.createTask({ title: 'archived', project_path: tmp });
+  db.archiveTask(archived.id);
+
+  for (const task of [started, withSession, inProgress, archived].map((t) => db.getTask(t.id))) {
+    assert.equal(db.canDeleteTask(task), false);
+    assert.throws(() => db.deleteTask(task.id), /Only unstarted backlog tasks can be deleted/);
+    assert.equal(db.getTask(task.id).id, task.id);
+  }
+
+  db.db.close();
+});
+
 test('upserting a session clears stale ended_at after resume', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-session-resume-'));
   const db = loadDb(path.join(tmp, 'tasks.db'));

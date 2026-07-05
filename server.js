@@ -760,13 +760,25 @@ app.patch('/api/tasks/:id', (req, res) => {
   res.json(db.updateTask(req.params.id, patch));
 });
 
-// Tasks are archived, never hard-deleted (data is preserved).
 app.post('/api/tasks/:id/archive', (req, res) => {
   const task = db.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'not found' });
   manager.stop(req.params.id);
   pending.delete(req.params.id);
   res.json(db.archiveTask(req.params.id));
+});
+
+app.delete('/api/tasks/:id', (req, res) => {
+  const task = db.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'not found' });
+  if (!db.canDeleteTask(task)) {
+    return res.status(409).json({
+      error: 'Only unstarted backlog tasks can be deleted; started, archived, or historical tasks can only be archived.',
+      code: 'TASK_DELETE_UNSAFE',
+    });
+  }
+  pending.delete(req.params.id);
+  res.json({ ok: true, task: db.deleteTask(req.params.id) });
 });
 
 app.post('/api/tasks/:id/unarchive', (req, res) => {

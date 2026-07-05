@@ -552,6 +552,7 @@ function renderCard(t) {
     // Backlog = not started yet → editable, and Start launches it.
     actions.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => startTask(t) }, '▶ Start'));
     actions.append(h('button', { class: 'btn btn-sm', onclick: () => openTaskModal(t) }, '✎ Edit'));
+    if (isEditable(t)) actions.append(h('button', { class: 'btn btn-ghost btn-sm', onclick: () => deleteTask(t) }, 'Delete'));
     actions.append(h('button', { class: 'btn btn-ghost btn-sm', onclick: () => archiveTask(t) }, 'Archive'));
   } else {
     actions.append(h('button', { class: 'btn btn-sm', onclick: () => (t.live ? openTab(t) : resumeTask(t)) }, t.live ? '⧉ Open' : '▶ Resume'));
@@ -639,6 +640,28 @@ async function forkTask(t) {
     openTab(child);
   } catch (e) {
     toast('Fork failed: ' + e.message, { err: true });
+  }
+}
+
+async function deleteTask(t) {
+  if (!isEditable(t)) {
+    toast('Only unstarted backlog tasks can be deleted.', { err: true });
+    return;
+  }
+  if (!confirm('Permanently delete this unstarted backlog task?')) return;
+  try {
+    tabs.remove(t.id, { stop: true });
+    await api.send('DELETE', `/api/tasks/${t.id}`);
+    TASKS = TASKS.filter((x) => x.id !== t.id);
+    archivedCache = archivedCache.filter((x) => x.id !== t.id);
+    rebuildIndex();
+    renderBoard();
+    tabs.sync();
+    await refresh(true);
+    toast('Deleted “' + t.title + '”');
+  } catch (e) {
+    toast('Delete failed: ' + e.message, { err: true });
+    refresh(true);
   }
 }
 
