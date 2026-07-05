@@ -30,6 +30,7 @@ const { buildHookArgs } = require('./lib/hooksSettings');
 const { ensureSpawnHelper } = require('./lib/ensurePty');
 const updater = require('./lib/core/updater');
 const { loadExtensions } = require('./lib/core/extensions');
+const skills = require('./lib/skills');
 const { discoverModelProviders, normalizeActiveProvider } = require('./lib/modelProviders');
 const { getProvider } = require('./lib/providers');
 const { SessionManager } = require('./lib/sessionRunner');
@@ -438,6 +439,157 @@ app.patch('/api/connections/models', (req, res) => {
   }
   db.setMetaValue(ACTIVE_MODEL_PROVIDER_KEY, provider.id);
   res.json(discoverModelProviders({ activeProvider: provider.id }));
+});
+
+function skillProviderPayload(providerId) {
+  const provider = skills.normalizeSkillProvider(providerId || activeModelProvider());
+  const models = discoverModelProviders({ activeProvider: activeModelProvider() });
+  return {
+    ...skills.listSkills(provider),
+    activeProvider: models.activeProvider,
+    providers: models.providers.map((p) => ({
+      id: p.id,
+      name: p.name,
+      active: p.active,
+      installed: p.installed,
+      connected: p.connected,
+      canActivate: p.canActivate,
+      disabledReason: p.disabledReason,
+      status: p.status,
+    })),
+  };
+}
+
+function skillRouteError(res, error) {
+  res.status(400).json({ error: error && error.message ? error.message : String(error) });
+}
+
+function assertSkillProviderReady(providerId) {
+  const provider = getProvider(providerId);
+  const detected = provider.detect();
+  if (!detected.installed) throw new Error(`${provider.name || provider.id} CLI not found`);
+  if (!detected.connected) throw new Error(`${provider.name || provider.id} authentication required`);
+  if (!provider.launchSupported) throw new Error(`${provider.name || provider.id} launch is not wired`);
+  return provider;
+}
+
+function createSkillPrompt(providerName, rootDir) {
+  return [
+    `Open in this ${providerName} root skills directory: ${rootDir}`,
+    `Create a new ${providerName} skill in this directory.`,
+    'Ask one concise question at a time until you know what skill to create, then create the skill folder with SKILL.md and any supporting resources.',
+    'Use the provider skill format already present in this directory. Do not edit unrelated application files.',
+  ].join('\n\n');
+}
+
+function editSkillPrompt(providerName, skill) {
+  return [
+    `Open in this ${providerName} skill directory: ${skill.path}`,
+    `Edit the existing skill named "${skill.name || skill.id}".`,
+    'Ask what change is needed, then update SKILL.md and any supporting resources in this skill directory only unless the user explicitly asks otherwise.',
+  ].join('\n\n');
+}
+
+function launchSkillTask({ providerId, title, cwd, prompt }) {
+  const provider = assertSkillProviderReady(providerId);
+  const resolved = provider.resolveProjectPath(cwd);
+  if (!provider.safeIsDir(resolved)) throw new Error(`skill directory does not exist: ${resolved}`);
+  const modes = modesForProvider(provider.id);
+  const mode = modes.includes('build') ? 'build' : modes[0] || 'build';
+  const normalized = provider.normalizeTaskSettings({
+    model: provider.defaultModel(),
+    effort: 'medium',
+    mode,
+    yolo: mode === 'build' ? YOLO : 0,
+    ultracode: 0,
+  });
+  const task = db.createTask({
+    title,
+    description: prompt,
+    project_path: resolved,
+    provider: provider.id,
+    status: 'in_progress',
+    model: normalized.model,
+    effort: normalized.effort,
+    mode: normalized.mode,
+    yolo: normalized.yolo,
+    ultracode: normalized.ultracode,
+  });
+  db.updateTask(task.id, {
+    started_at: db.now(),
+    ended_at: null,
+    activity: String(prompt || '').trim() ? 'working' : 'idle',
+  });
+  pending.set(task.id, { kind: 'start', prompt });
+  return db.getTask(task.id);
+}
+
+app.get('/api/skills', (req, res) => {
+  try {
+    res.json(skillProviderPayload(req.query.provider));
+  } catch (e) {
+    skillRouteError(res, e);
+  }
+});
+
+app.post('/api/skills/install', (req, res) => {
+  try {
+    const providerId = skills.normalizeSkillProvider((req.body || {}).provider || activeModelProvider());
+    const installed = skills.installSkill({
+      providerId,
+      source: (req.body || {}).source,
+      recommendedId: (req.body || {}).recommended_id,
+    });
+    res.json({ installed, skills: skillProviderPayload(providerId) });
+  } catch (e) {
+    skillRouteError(res, e);
+  }
+});
+
+app.delete('/api/skills/:provider/:skillId', (req, res) => {
+  try {
+    const providerId = skills.normalizeSkillProvider(req.params.provider || activeModelProvider());
+    const removed = skills.uninstallUserSkill(providerId, req.params.skillId);
+    res.json({ removed, skills: skillProviderPayload(providerId) });
+  } catch (e) {
+    skillRouteError(res, e);
+  }
+});
+
+app.post('/api/skills/create-session', (req, res) => {
+  try {
+    const providerId = skills.normalizeSkillProvider((req.body || {}).provider || activeModelProvider());
+    const root = skills.providerRoots(providerId);
+    fs.mkdirSync(root.userDir, { recursive: true });
+    const providerName = providerId === 'claude' ? 'Claude' : 'Codex';
+    const task = launchSkillTask({
+      providerId,
+      title: `Create ${providerName} skill`,
+      cwd: root.userDir,
+      prompt: createSkillPrompt(providerName, root.userDir),
+    });
+    res.status(201).json({ task, pending: true });
+  } catch (e) {
+    skillRouteError(res, e);
+  }
+});
+
+app.post('/api/skills/edit-session', (req, res) => {
+  try {
+    const providerId = skills.normalizeSkillProvider((req.body || {}).provider || activeModelProvider());
+    const skill = skills.userSkillById(providerId, (req.body || {}).skill_id);
+    if (!skill) return res.status(404).json({ error: 'user skill not found' });
+    const providerName = providerId === 'claude' ? 'Claude' : 'Codex';
+    const task = launchSkillTask({
+      providerId,
+      title: `Edit ${skill.name || skill.id}`,
+      cwd: skill.path,
+      prompt: editSkillPrompt(providerName, skill),
+    });
+    res.status(201).json({ task, pending: true });
+  } catch (e) {
+    skillRouteError(res, e);
+  }
 });
 
 function spawnReplacementServer() {

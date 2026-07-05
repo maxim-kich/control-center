@@ -134,7 +134,7 @@
         <div class="projects-sidebar-head">
           <div class="projects-sidebar-title">
             <span>Settings</span>
-            <span id="settingsListCount" class="count">2</span>
+            <span id="settingsListCount" class="count">4</span>
           </div>
         </div>
         <div class="settings-list">
@@ -148,6 +148,12 @@
             <span class="settings-row-main">
               <span class="project-row-title"><span>Models</span></span>
               <span class="project-row-path">CLI providers</span>
+            </span>
+          </button>
+          <button class="settings-row" type="button" data-settings-section="skills">
+            <span class="settings-row-main">
+              <span class="project-row-title"><span>Skills</span></span>
+              <span class="project-row-path">Manage your skills</span>
             </span>
           </button>
           <button class="settings-row" type="button" data-settings-section="extensions">
@@ -203,6 +209,43 @@
         </div>
         <div id="modelProviderGrid" class="model-provider-grid"></div>
       </section>
+      <section class="settings-canvas" data-settings-panel="skills" hidden>
+        <header class="project-canvas-head">
+          <div class="project-canvas-main">
+            <h3>Skills</h3>
+            <div id="skillsSummary" class="project-path-line">Checking skills...</div>
+          </div>
+          <div class="project-canvas-actions">
+            <button id="createSkillBtn" class="btn btn-primary btn-sm" type="button">Create skill</button>
+            <button id="installSkillBtn" class="btn btn-sm" type="button">Install skill</button>
+          </div>
+        </header>
+        <div id="skillProviderSwitch" class="skill-provider-switch"></div>
+        <div class="settings-section-head skill-section-head">
+          <button class="settings-section-toggle" type="button" data-skill-category="recommended" aria-expanded="true">
+            <span class="settings-section-title">Recommended</span>
+            <span id="recommendedSkillCount" class="settings-section-count"></span>
+            <span class="settings-section-caret">▾</span>
+          </button>
+        </div>
+        <div id="recommendedSkillList" class="skill-list"></div>
+        <div class="settings-section-head skill-section-head">
+          <button class="settings-section-toggle" type="button" data-skill-category="provider" aria-expanded="true">
+            <span id="providerSkillSectionTitle" class="settings-section-title">Codex</span>
+            <span id="providerSkillCount" class="settings-section-count"></span>
+            <span class="settings-section-caret">▾</span>
+          </button>
+        </div>
+        <div id="providerSkillList" class="skill-list"></div>
+        <div class="settings-section-head skill-section-head">
+          <button class="settings-section-toggle" type="button" data-skill-category="user" aria-expanded="true">
+            <span class="settings-section-title">User skills</span>
+            <span id="userSkillCount" class="settings-section-count"></span>
+            <span class="settings-section-caret">▾</span>
+          </button>
+        </div>
+        <div id="userSkillList" class="skill-list"></div>
+      </section>
       <section class="settings-canvas" data-settings-panel="extensions" hidden>
         <header class="project-canvas-head">
           <div class="project-canvas-main">
@@ -224,6 +267,26 @@
       </section>
     </main>
   </section>
+
+  <div class="modal-overlay" id="skillInstallModal" hidden>
+    <div class="modal modal-sm">
+      <header class="modal-head">
+        <h3>Install skill</h3>
+        <button class="icon-btn" data-close="skillInstallModal" type="button">✕</button>
+      </header>
+      <form id="skillInstallForm" class="form">
+        <label>
+          Source
+          <input id="skillInstallSource" placeholder="https://github.com/owner/skill or /path/to/skill" />
+          <span class="hint">GitHub repositories and local folders must contain SKILL.md.</span>
+        </label>
+        <div class="form-actions">
+          <button class="btn" type="button" data-close="skillInstallModal">Cancel</button>
+          <button id="skillInstallSubmit" class="btn btn-primary" type="submit">Install</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- New / edit task dialog -->
   <div class="modal-overlay" id="taskModal" hidden>

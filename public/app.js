@@ -42,6 +42,16 @@ function bellIcon(slashed) {
   return svgIcon(paths);
 }
 
+function trashIcon() {
+  return svgIcon([
+    'M3 6h18',
+    'M8 6V4h8v2',
+    'M6 6l1 15h10l1-15',
+    'M10 11v6',
+    'M14 11v6',
+  ]);
+}
+
 const $ = (sel) => document.querySelector(sel);
 const api = {
   async get(url) {
@@ -129,11 +139,14 @@ let PROJECTS = [];
 let MODEL_CONNECTIONS = { activeProvider: 'codex', providers: [], updatedAt: null };
 let GENERAL_SETTINGS = { caffeinateEnabled: true, caffeinate: null, version: null };
 let EXTENSION_SETTINGS = { extensionsDir: '', extensions: [], conflicts: [] };
+let SKILL_SETTINGS = { provider: null, activeProvider: null, providers: [], roots: {}, recommended: [], providerSkills: [], userSkills: [] };
+let skillCategoryCollapsed = { recommended: false, provider: false, user: false };
 let byId = new Map();
 let lastSig = null;
 let workspaceRoot = null;
 let projectFilter = '';
 let selectedProjectId = null;
+const SETTINGS_SECTIONS = ['general', 'models', 'skills', 'extensions'];
 let currentPage = 'dashboard';
 let currentSettingsSection = 'general';
 let showArchive = false;
@@ -145,6 +158,7 @@ let quittingServer = false;
 let generalSettingsSaving = false;
 let updateCheckSaving = false;
 let updateActionSaving = null;
+let skillActionSaving = null;
 let archivedCache = [];
 let tabsRestored = false; // one-shot guard: re-open live terminals on the first page load
 let uiStateRestoring = false;
@@ -265,7 +279,7 @@ function restoreUiStateForBoot() {
   const state = saved.state;
   uiStateRestoring = true;
   currentPage = ['dashboard', 'projects', 'settings'].includes(state.page) ? state.page : currentPage;
-  currentSettingsSection = ['general', 'models', 'extensions'].includes(state.settingsSection) ? state.settingsSection : currentSettingsSection;
+  currentSettingsSection = SETTINGS_SECTIONS.includes(state.settingsSection) ? state.settingsSection : currentSettingsSection;
   selectedProjectId = state.selectedProjectId || selectedProjectId;
   projectFilter = typeof state.projectFilter === 'string' ? state.projectFilter : projectFilter;
   showArchive = !!state.showArchive;
@@ -1775,6 +1789,7 @@ function setPage(page) {
   renderBoard();
   renderGeneralSettings();
   renderModelsSection();
+  renderSkillsSection();
   renderExtensionsSection();
   persistUiState();
 }
@@ -1783,6 +1798,12 @@ $('#dashboardPageBtn').addEventListener('click', () => setPage('dashboard'));
 $('#projectsPageBtn').addEventListener('click', () => setPage('projects'));
 $('#settingsPageBtn').addEventListener('click', () => setPage('settings'));
 $('#refreshModelsBtn').addEventListener('click', loadModelConnections);
+$('#createSkillBtn').addEventListener('click', startSkillCreate);
+$('#installSkillBtn').addEventListener('click', openSkillInstallModal);
+$('#skillInstallForm').addEventListener('submit', submitSkillInstall);
+for (const btn of document.querySelectorAll('[data-skill-category]')) {
+  btn.addEventListener('click', () => setSkillCategoryCollapsed(btn.dataset.skillCategory, !skillCategoryCollapsed[btn.dataset.skillCategory]));
+}
 $('#refreshExtensionsBtn').addEventListener('click', loadExtensions);
 for (const btn of document.querySelectorAll('[data-settings-section]')) {
   btn.addEventListener('click', () => setSettingsSection(btn.dataset.settingsSection));
@@ -1911,7 +1932,9 @@ function renderProjectsPage() {
 
 function setSettingsSection(section, opts) {
   opts = opts || {};
-  currentSettingsSection = ['general', 'models', 'extensions'].includes(section) ? section : 'general';
+  const next = SETTINGS_SECTIONS.includes(section) ? section : 'general';
+  const changed = currentSettingsSection !== next;
+  currentSettingsSection = next;
   for (const btn of document.querySelectorAll('[data-settings-section]')) {
     btn.classList.toggle('active', btn.dataset.settingsSection === currentSettingsSection);
   }
@@ -1920,14 +1943,16 @@ function setSettingsSection(section, opts) {
   }
   renderGeneralSettings();
   renderModelsSection();
+  renderSkillsSection();
   renderExtensionsSection();
   if (currentPage === 'settings' && opts.load !== false) loadCurrentSettingsSection();
-  persistUiState();
+  if (changed) persistUiState();
 }
 
 function loadCurrentSettingsSection() {
   setSettingsSection(currentSettingsSection, { load: false });
   if (currentSettingsSection === 'models') loadModelConnections();
+  else if (currentSettingsSection === 'skills') loadSkills();
   else if (currentSettingsSection === 'extensions') loadExtensions();
   else loadGeneralSettings();
 }
@@ -2097,6 +2122,295 @@ async function runUpdateAction(kind) {
   } finally {
     updateActionSaving = null;
     renderGeneralSettings();
+  }
+}
+
+function skillProviderName(providerId) {
+  const provider = (SKILL_SETTINGS.providers || MODEL_CONNECTIONS.providers || []).find((p) => p.id === providerId);
+  if (provider && provider.name) return provider.name;
+  return providerId === 'claude' ? 'Claude' : 'Codex';
+}
+
+function selectedSkillProvider() {
+  return SKILL_SETTINGS.provider || SKILL_SETTINGS.activeProvider || MODEL_CONNECTIONS.activeProvider || 'codex';
+}
+
+function setSkillCategoryCollapsed(category, collapsed) {
+  if (!Object.prototype.hasOwnProperty.call(skillCategoryCollapsed, category)) return;
+  skillCategoryCollapsed = { ...skillCategoryCollapsed, [category]: !!collapsed };
+  renderSkillsSection();
+}
+
+function syncSkillCategoryToggle(category, count) {
+  const btn = document.querySelector(`[data-skill-category="${category}"]`);
+  if (!btn) return;
+  const collapsed = !!skillCategoryCollapsed[category];
+  btn.classList.toggle('collapsed', collapsed);
+  btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  const countEl = category === 'recommended' ? $('#recommendedSkillCount')
+    : category === 'provider' ? $('#providerSkillCount')
+      : $('#userSkillCount');
+  if (countEl) countEl.textContent = `(${count})`;
+}
+
+function skillListEmpty(text) {
+  return h('div', { class: 'empty-state skill-empty' }, text);
+}
+
+function renderSkillProviderSwitch(selectedProvider) {
+  const host = $('#skillProviderSwitch');
+  if (!host) return;
+  const providers = (SKILL_SETTINGS.providers && SKILL_SETTINGS.providers.length)
+    ? SKILL_SETTINGS.providers
+    : (MODEL_CONNECTIONS.providers || []);
+  const entries = providers.length ? providers : [
+    { id: 'codex', name: 'Codex', active: selectedProvider === 'codex' },
+    { id: 'claude', name: 'Claude', active: selectedProvider === 'claude' },
+  ];
+  host.replaceChildren(...entries.map((provider) => {
+    const selected = provider.id === selectedProvider;
+    return h('button', {
+      type: 'button',
+      class: 'btn btn-sm' + (selected ? ' btn-primary' : ''),
+      disabled: !!skillActionSaving || selected,
+      title: provider.active ? 'Active model provider' : (provider.disabledReason || `Show ${provider.name || provider.id} skills`),
+      onclick: () => loadSkills(provider.id),
+    }, provider.name || provider.id);
+  }));
+}
+
+function renderSkillInfo(skill) {
+  return h('div', { class: 'skill-row-main' },
+    h('div', { class: 'skill-row-title' }, skill.name || skill.id),
+    h('div', { class: 'skill-row-description' }, skill.description || 'No description'),
+  );
+}
+
+function skillUninstallButton(skill) {
+  if (!skill || !skill.editable) return null;
+  return h('button', {
+    type: 'button',
+    class: 'icon-btn skill-trash-btn',
+    disabled: !!skillActionSaving,
+    title: 'Uninstall skill',
+    'aria-label': 'Uninstall ' + (skill.name || skill.id),
+    onclick: () => uninstallSkill(skill),
+  }, trashIcon());
+}
+
+function renderRecommendedSkill(skill) {
+  const editableInstalledSkill = skill.installedSkill && skill.installedSkill.editable ? skill.installedSkill : null;
+  return h('article', { class: 'skill-row' },
+    renderSkillInfo(skill),
+    h('div', { class: 'skill-row-actions' },
+      skill.installed
+        ? h('span', { class: 'skill-installed-badge' }, 'Installed')
+        : h('button', {
+          type: 'button',
+          class: 'btn btn-sm',
+          disabled: !!skillActionSaving,
+          onclick: () => installRecommendedSkill(skill),
+        }, skillActionSaving === skill.id ? 'Installing...' : 'Install'),
+      editableInstalledSkill ? h('button', {
+        type: 'button',
+        class: 'btn btn-sm',
+        disabled: !!skillActionSaving,
+        onclick: () => startSkillEdit(editableInstalledSkill),
+      }, skillActionSaving === editableInstalledSkill.id ? 'Opening...' : 'Edit skill') : null,
+      skillUninstallButton(editableInstalledSkill),
+      h('a', {
+        class: 'icon-btn skill-source-link',
+        href: skill.sourceUrl,
+        target: '_blank',
+        rel: 'noreferrer',
+        title: 'Open source',
+      }, '↗'),
+    ),
+  );
+}
+
+function renderProviderSkill(skill) {
+  return h('article', { class: 'skill-row' },
+    renderSkillInfo(skill),
+  );
+}
+
+function renderUserSkill(skill) {
+  return h('article', { class: 'skill-row' },
+    renderSkillInfo(skill),
+    h('div', { class: 'skill-row-actions' },
+      h('button', {
+        type: 'button',
+        class: 'btn btn-sm',
+        disabled: !!skillActionSaving,
+        onclick: () => startSkillEdit(skill),
+      }, skillActionSaving === skill.id ? 'Opening...' : 'Edit skill'),
+      skillUninstallButton(skill),
+    ),
+  );
+}
+
+function renderSkillsSection() {
+  const summary = $('#skillsSummary');
+  const recommended = $('#recommendedSkillList');
+  const providerList = $('#providerSkillList');
+  const userList = $('#userSkillList');
+  if (!summary || !recommended || !providerList || !userList) return;
+  const createButton = $('#createSkillBtn');
+  const installButton = $('#installSkillBtn');
+  const skillsReady = !!SKILL_SETTINGS.provider;
+  if (createButton) createButton.disabled = !!skillActionSaving || !skillsReady;
+  if (installButton) installButton.disabled = !!skillActionSaving || !skillsReady;
+  const providerName = skillProviderName(selectedSkillProvider());
+  const root = SKILL_SETTINGS.roots && SKILL_SETTINGS.roots.userDir;
+  const recommendedSkills = SKILL_SETTINGS.recommended || [];
+  const providerSkills = SKILL_SETTINGS.providerSkills || [];
+  const userSkills = SKILL_SETTINGS.userSkills || [];
+  summary.textContent = `${providerName} · ${userSkills.length} user skills · ${providerSkills.length} provider skills${root ? ' · ' + root : ''}`;
+  renderSkillProviderSwitch(selectedSkillProvider());
+  const sectionTitle = $('#providerSkillSectionTitle');
+  if (sectionTitle) sectionTitle.textContent = providerName;
+  syncSkillCategoryToggle('recommended', recommendedSkills.length);
+  syncSkillCategoryToggle('provider', providerSkills.length);
+  syncSkillCategoryToggle('user', userSkills.length);
+
+  recommended.replaceChildren();
+  recommended.hidden = !!skillCategoryCollapsed.recommended;
+  for (const skill of recommendedSkills) recommended.append(renderRecommendedSkill(skill));
+  if (!recommended.childElementCount) recommended.append(skillListEmpty('No recommended skills.'));
+
+  providerList.replaceChildren();
+  providerList.hidden = !!skillCategoryCollapsed.provider;
+  for (const skill of providerSkills) providerList.append(renderProviderSkill(skill));
+  if (!providerList.childElementCount) providerList.append(skillListEmpty(`No ${providerName} provider skills found.`));
+
+  userList.replaceChildren();
+  userList.hidden = !!skillCategoryCollapsed.user;
+  for (const skill of userSkills) userList.append(renderUserSkill(skill));
+  if (!userList.childElementCount) userList.append(skillListEmpty('No user skills installed.'));
+}
+
+async function loadSkills(providerId) {
+  const provider = providerId || selectedSkillProvider();
+  const suffix = provider ? `?provider=${encodeURIComponent(provider)}` : '';
+  try {
+    SKILL_SETTINGS = await api.get('/api/skills' + suffix);
+    renderSkillsSection();
+  } catch (e) {
+    const summary = $('#skillsSummary');
+    if (summary) summary.textContent = 'Skill check failed';
+    const list = $('#userSkillList');
+    if (list) list.replaceChildren(h('div', { class: 'project-empty' }, e.message));
+  }
+}
+
+async function openSkillTaskResult(result, message) {
+  await refresh(true);
+  const task = result && result.task && (byId.get(result.task.id) || result.task);
+  if (task) tabs.open(task, { focusTerminal: true });
+  if (message) toast(message);
+}
+
+async function startSkillCreate() {
+  const provider = selectedSkillProvider();
+  skillActionSaving = 'create';
+  renderSkillsSection();
+  try {
+    const result = await api.send('POST', '/api/skills/create-session', { provider });
+    await openSkillTaskResult(result, 'Skill creator opened');
+  } catch (e) {
+    toast('Skill creator failed: ' + e.message, { err: true });
+  } finally {
+    skillActionSaving = null;
+    renderSkillsSection();
+  }
+}
+
+async function startSkillEdit(skill) {
+  if (!skill) return;
+  const provider = selectedSkillProvider();
+  skillActionSaving = skill.id;
+  renderSkillsSection();
+  try {
+    const result = await api.send('POST', '/api/skills/edit-session', { provider, skill_id: skill.id });
+    await openSkillTaskResult(result, 'Skill editor opened');
+  } catch (e) {
+    toast('Skill editor failed: ' + e.message, { err: true });
+  } finally {
+    skillActionSaving = null;
+    renderSkillsSection();
+  }
+}
+
+async function installRecommendedSkill(skill) {
+  if (!skill || skill.installed) return;
+  const provider = selectedSkillProvider();
+  skillActionSaving = skill.id;
+  renderSkillsSection();
+  try {
+    const result = await api.send('POST', '/api/skills/install', {
+      provider,
+      source: skill.sourceUrl,
+      recommended_id: skill.id,
+    });
+    SKILL_SETTINGS = result.skills || SKILL_SETTINGS;
+    renderSkillsSection();
+    toast('Installed ' + (skill.name || skill.id));
+  } catch (e) {
+    toast('Skill install failed: ' + e.message, { err: true });
+  } finally {
+    skillActionSaving = null;
+    renderSkillsSection();
+  }
+}
+
+async function uninstallSkill(skill) {
+  if (!skill || !skill.editable) return;
+  const name = skill.name || skill.id;
+  if (!confirm(`Uninstall "${name}"? This removes the user skill folder.`)) return;
+  const provider = selectedSkillProvider();
+  skillActionSaving = skill.id;
+  renderSkillsSection();
+  try {
+    const result = await api.send('DELETE', `/api/skills/${encodeURIComponent(provider)}/${encodeURIComponent(skill.id)}`);
+    SKILL_SETTINGS = result.skills || SKILL_SETTINGS;
+    renderSkillsSection();
+    toast('Uninstalled ' + name);
+  } catch (e) {
+    toast('Skill uninstall failed: ' + e.message, { err: true });
+  } finally {
+    skillActionSaving = null;
+    renderSkillsSection();
+  }
+}
+
+function openSkillInstallModal() {
+  $('#skillInstallSource').value = '';
+  $('#skillInstallSubmit').disabled = false;
+  show('skillInstallModal');
+  setTimeout(() => $('#skillInstallSource').focus(), 30);
+}
+
+async function submitSkillInstall(ev) {
+  ev.preventDefault();
+  const provider = selectedSkillProvider();
+  const source = $('#skillInstallSource').value.trim();
+  if (!source) return toast('Skill source is required', { err: true });
+  $('#skillInstallSubmit').disabled = true;
+  skillActionSaving = 'install';
+  renderSkillsSection();
+  try {
+    const result = await api.send('POST', '/api/skills/install', { provider, source });
+    SKILL_SETTINGS = result.skills || SKILL_SETTINGS;
+    hide('skillInstallModal');
+    renderSkillsSection();
+    toast('Installed ' + ((result.installed && (result.installed.name || result.installed.id)) || 'skill'));
+  } catch (e) {
+    toast('Skill install failed: ' + e.message, { err: true });
+  } finally {
+    $('#skillInstallSubmit').disabled = false;
+    skillActionSaving = null;
+    renderSkillsSection();
   }
 }
 
@@ -2299,6 +2613,7 @@ async function loadModelConnections() {
   try {
     MODEL_CONNECTIONS = await api.get('/api/connections/models');
     renderModelsSection();
+    renderSkillsSection();
     updateSettingsAttention();
   } catch (e) {
     const summary = $('#modelsSummary');
@@ -2313,6 +2628,7 @@ async function activateModelProvider(providerId) {
     MODEL_CONNECTIONS = await api.send('PATCH', '/api/connections/models', { active_provider: providerId });
     renderModelsSection();
     const active = (MODEL_CONNECTIONS.providers || []).find((p) => p.active);
+    if (currentSettingsSection === 'skills') loadSkills();
     toast('Active model provider: ' + (active ? active.name : providerId));
   } catch (e) {
     toast('Model provider update failed: ' + e.message, { err: true });
@@ -2846,7 +3162,7 @@ init().catch((e) => {
   refresh(true);
 });
 setInterval(() => {
-  if ($('#taskModal').hidden && $('#detailsModal').hidden && $('#mediaModal').hidden) refresh();
+  if ($('#taskModal').hidden && $('#detailsModal').hidden && $('#mediaModal').hidden && $('#skillInstallModal').hidden) refresh();
   else tabs.sync();
   if (currentPage === 'projects' && !shouldDeferBoardRender()) loadProjects();
   if (!$('#drawer').hidden && tabs.activeId) tabs.refreshUsage();
