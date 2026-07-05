@@ -58,6 +58,12 @@ test('codex buildArgs maps task settings to interactive CLI args', () => {
   assert.ok(!resume.includes('--dangerously-bypass-approvals-and-sandbox'));
 });
 
+test('codex hook args include PostToolUse activity recovery hook', () => {
+  const { buildHookArgs } = require('../lib/hooksSettings');
+  const args = buildHookArgs(process.execPath);
+  assert.ok(args.some((arg) => arg.startsWith('hooks.PostToolUse=')));
+});
+
 test('codex buildArgs skips hook trust flag when selected CLI does not support it', () => {
   const codex = require('../lib/codex');
   const args = codex.buildArgs({

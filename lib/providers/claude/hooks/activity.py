@@ -154,6 +154,20 @@ def main():
 
     event = data.get("hook_event_name") or ""
     now = datetime.datetime.now(datetime.timezone.utc)
+    if event == "PostToolUse":
+        conn = sqlite3.connect(db_path, timeout=5)
+        try:
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute(
+                "UPDATE tasks SET activity='working', wake_at=NULL, updated_at=? "
+                "WHERE id=? AND archived=0 AND activity='idle'",
+                (now.isoformat(), task_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return 0
+
     if event == "UserPromptSubmit":
         activity, wake_at = "working", None
     elif event == "Stop":

@@ -68,7 +68,10 @@ test('claude buildLaunch uses pre-generated session ids and generated settings',
   assert.match(launch.sessionId, /^[0-9a-f-]{36}$/i);
   assert.deepEqual(launch.args.slice(0, 2), ['--session-id', launch.sessionId]);
   assert.ok(launch.args.includes('--settings'));
-  assert.ok(fs.existsSync(launch.args[launch.args.indexOf('--settings') + 1]));
+  const settingsPath = launch.args[launch.args.indexOf('--settings') + 1];
+  assert.ok(fs.existsSync(settingsPath));
+  const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  assert.ok(settings.hooks.PostToolUse);
   assert.ok(launch.args.includes('--permission-mode'));
   assert.ok(launch.args.includes('auto'));
   assert.equal(launch.args[launch.args.length - 1], 'Do the work.\n\nultracode');

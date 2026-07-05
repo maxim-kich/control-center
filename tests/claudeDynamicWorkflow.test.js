@@ -126,3 +126,22 @@ test('Claude Stop with empty session_crons overrides stale ScheduleWakeup', () =
   assert.equal(row.activity, 'idle');
   assert.equal(row.wake_at, null);
 });
+
+test('Claude PostToolUse recovers idle task after tool answer', () => {
+  const row = runHook(makeDb({ activity: 'idle', wake_at: '2999-01-01T00:00:00+00:00' }), {
+    hook_event_name: 'PostToolUse',
+    tool_name: 'AskUserQuestion',
+  });
+  assert.equal(row.activity, 'working');
+  assert.equal(row.wake_at, null);
+});
+
+test('Claude PostToolUse does not clobber workflow waits', () => {
+  const wake = '2999-01-01T00:00:00+00:00';
+  const row = runHook(makeDb({ activity: 'workflow', wake_at: wake }), {
+    hook_event_name: 'PostToolUse',
+    tool_name: 'ScheduleWakeup',
+  });
+  assert.equal(row.activity, 'workflow');
+  assert.equal(row.wake_at, wake);
+});

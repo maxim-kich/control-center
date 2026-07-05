@@ -90,12 +90,14 @@ SVG
 
 mkdir -p "${ROOT}/public"
 cp "${RESOURCES_DIR}/AppIcon.svg" "${ROOT}/public/notification-icon.svg"
+cp "${RESOURCES_DIR}/AppIcon.svg" "${ROOT}/public/favicon.svg"
 
 if command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
   rm -rf "$ICONSET_DIR"
   mkdir -p "$ICONSET_DIR"
 
   /usr/bin/sips -s format png -z 512 512 "${RESOURCES_DIR}/AppIcon.svg" --out "${ROOT}/public/notification-icon.png" >/dev/null
+  /usr/bin/sips -s format png -z 512 512 "${RESOURCES_DIR}/AppIcon.svg" --out "${ROOT}/public/favicon.png" >/dev/null
   /usr/bin/sips -s format png -z 16 16 "${RESOURCES_DIR}/AppIcon.svg" --out "${ICONSET_DIR}/icon_16x16.png" >/dev/null
   /usr/bin/sips -s format png -z 32 32 "${RESOURCES_DIR}/AppIcon.svg" --out "${ICONSET_DIR}/icon_16x16@2x.png" >/dev/null
   /usr/bin/sips -s format png -z 32 32 "${RESOURCES_DIR}/AppIcon.svg" --out "${ICONSET_DIR}/icon_32x32.png" >/dev/null

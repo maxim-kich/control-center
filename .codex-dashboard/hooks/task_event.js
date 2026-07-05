@@ -132,6 +132,18 @@ function setActivity(db, taskId, activity, ts) {
     .run(activity, ts, taskId);
 }
 
+function recoverIdleAfterTool(db, taskId, ts) {
+  db.prepare(`
+    UPDATE tasks
+    SET activity = 'working',
+        wake_at = NULL,
+        updated_at = ?
+    WHERE id = ?
+      AND archived = 0
+      AND activity = 'idle'
+  `).run(ts, taskId);
+}
+
 function main() {
   const event = process.argv[2] || '';
   const data = readJsonStdin();
@@ -182,6 +194,8 @@ function main() {
     if (!taskId) return 0;
     if (event === 'UserPromptSubmit') {
       setActivity(db, taskId, 'working', ts);
+    } else if (event === 'PostToolUse') {
+      recoverIdleAfterTool(db, taskId, ts);
     } else if (event === 'PermissionRequest') {
       setActivity(db, taskId, 'idle', ts);
     } else if (event === 'Stop') {

@@ -102,6 +102,51 @@ test('Stop hook marks idle when transcript turn is complete', () => {
   assert.equal(readTask(dbPath, task.id).activity, 'idle');
 });
 
+test('PostToolUse hook recovers idle Codex task after permission approval', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-hook-post-tool-'));
+  const dbPath = path.join(tmp, 'tasks.db');
+
+  const db = loadDb(dbPath);
+  const task = db.createTask({ title: 'approved command', project_path: tmp });
+  db.updateTask(task.id, {
+    status: 'in_progress',
+    session_id: 'sess-1',
+    activity: 'idle',
+    wake_at: '2999-01-01T00:00:00.000Z',
+    started_at: db.now(),
+  });
+  db.db.close();
+
+  runHook('PostToolUse', dbPath, task.id, { tool_name: 'Bash' });
+
+  const taskAfter = readTask(dbPath, task.id);
+  assert.equal(taskAfter.activity, 'working');
+  assert.equal(taskAfter.wake_at, null);
+});
+
+test('PostToolUse hook does not clobber non-idle Codex task state', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-hook-post-tool-guard-'));
+  const dbPath = path.join(tmp, 'tasks.db');
+  const wakeAt = '2999-01-01T00:00:00.000Z';
+
+  const db = loadDb(dbPath);
+  const task = db.createTask({ title: 'workflow wait', project_path: tmp });
+  db.updateTask(task.id, {
+    status: 'in_progress',
+    session_id: 'sess-1',
+    activity: 'workflow',
+    wake_at: wakeAt,
+    started_at: db.now(),
+  });
+  db.db.close();
+
+  runHook('PostToolUse', dbPath, task.id, { tool_name: 'Bash' });
+
+  const taskAfter = readTask(dbPath, task.id);
+  assert.equal(taskAfter.activity, 'workflow');
+  assert.equal(taskAfter.wake_at, wakeAt);
+});
+
 test('SessionStart hook clears stale session ended_at on resume', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-hook-session-start-'));
   const dbPath = path.join(tmp, 'tasks.db');

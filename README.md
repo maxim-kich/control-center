@@ -157,3 +157,7 @@ node scripts/e2e_test.js
 ```
 
 These skip real Codex launches unless `CC_REAL_CODEX=1` is set.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
