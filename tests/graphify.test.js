@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 function unloadDbModule() {
   delete require.cache[require.resolve('../lib/db')];
@@ -100,6 +101,16 @@ process.exit(2);
   return script;
 }
 
+function gitAvailable() {
+  return spawnSync('git', ['--version'], { encoding: 'utf8' }).status === 0;
+}
+
+function git(cwd, args) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return result.stdout.trim();
+}
+
 test('GraphifyManager installs project Codex integration and updates graph state', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-graphify-'));
   const projectPath = path.join(tmp, 'project');
@@ -134,6 +145,47 @@ test('GraphifyManager installs project Codex integration and updates graph state
       '--version',
       'install --project --platform codex',
       'hook install',
+      'update .',
+    ]);
+  } finally {
+    manager.shutdown();
+    db.db.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('GraphifyManager does not install hooks into a parent repository', async (t) => {
+  if (!gitAvailable()) return t.skip('git is not installed');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-graphify-parent-'));
+  const projectPath = path.join(tmp, 'workspace', 'project');
+  const logPath = path.join(tmp, 'graphify.log');
+  fs.mkdirSync(projectPath, { recursive: true });
+  git(path.join(tmp, 'workspace'), ['init']);
+
+  const db = loadDb(path.join(tmp, 'tasks.db'));
+  const { GraphifyManager } = require('../lib/graphify');
+  const fakeGraphify = writeFakeGraphify(tmp, logPath);
+  const project = db.createProject({ name: 'Project', path: projectPath });
+  const manager = new GraphifyManager(db, {
+    bin: fakeGraphify,
+    watch: false,
+    bootstrap: false,
+    semanticAuto: false,
+    debounceMs: 0,
+    setupTimeoutMs: 2000,
+    timeoutMs: 2000,
+  });
+
+  try {
+    manager.enqueue(project.id, 'project-created', { immediate: true });
+    const updated = await waitForProject(db, project.id, (p) => p.graphify_status === 'current');
+    assert.equal(updated.graphify_hook_status, 'parent_repo');
+    assert.match(updated.graphify_last_error, /inside a parent Git repository/);
+
+    const calls = fs.readFileSync(logPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line).args.join(' '));
+    assert.deepEqual(calls, [
+      '--version',
+      'install --project --platform codex',
       'update .',
     ]);
   } finally {

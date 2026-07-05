@@ -541,6 +541,11 @@ body.restore-loading-active > :not(.restore-loading) {
   font-weight: 650;
   line-height: 1;
 }
+.project-git-badge-warn {
+  color: #8a4b00;
+  border-color: #e0a33a;
+  background: #fff6df;
+}
 .project-git-badge-lg { height: 20px; font-size: 11px; }
 .graphify-pill {
   flex: 0 0 auto;
@@ -1015,6 +1020,12 @@ body.restore-loading-active > :not(.restore-loading) {
 .form { padding: 18px; display: flex; flex-direction: column; gap: 14px; overflow: auto; }
 .form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
 .form .hint { color: var(--muted-2); font-weight: 400; }
+.field-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: -6px;
+}
 .field-label { font-size: 12px; color: var(--muted); font-weight: 600; }
 .form input, .form textarea, .form select {
   font: inherit;

@@ -369,8 +369,19 @@ function renderGraphifyPill(project, opts) {
 }
 
 function renderProjectHeaderBadges(project) {
+  const gitBadge = project && project.git_initialized
+    ? h('span', {
+        class: 'project-git-badge project-git-badge-lg',
+        title: 'Project Git repository\n' + (project.git_repo_root || project.path || ''),
+      }, 'Git')
+    : project && project.git_repo_kind === 'parent'
+      ? h('span', {
+          class: 'project-git-badge project-git-badge-lg project-git-badge-warn',
+          title: project.git_warning || ('Parent Git repository: ' + project.git_parent_repo_root),
+        }, 'Parent Git')
+      : null;
   return [
-    project && project.git_initialized ? h('span', { class: 'project-git-badge project-git-badge-lg', title: 'Git repository' }, 'Git') : null,
+    gitBadge,
     renderGraphifyPill(project, { action: true }),
   ].filter(Boolean);
 }
@@ -574,8 +585,13 @@ async function markTaskDone(id) {
 
 function gitCommitNotice(updated) {
   const commit = updated && updated.git_commit;
-  if (!commit || !commit.ok || !commit.hash) return '';
-  return 'Committed ' + commit.hash;
+  if (!commit) return '';
+  if (commit.ok && commit.hash) return 'Committed ' + commit.hash;
+  if (commit.skipped === 'parent_repo') {
+    return 'Git auto-commit skipped: project is inside a parent repository';
+  }
+  if (commit.warning) return 'Git auto-commit skipped: ' + commit.warning;
+  return '';
 }
 
 async function completeTaskAndClose(id, { message } = {}) {
@@ -2313,6 +2329,19 @@ function openProjectModal(project) {
   $('#p_git').checked = project ? !!project.git_initialized : false;
   $('#p_git').disabled = project ? !!project.git_initialized : false;
   $('#p_git').closest('.checkbox').classList.toggle('disabled', $('#p_git').disabled);
+  const gitInfo = $('#projectGitInfo');
+  if (gitInfo) {
+    if (project && project.git_initialized) {
+      gitInfo.textContent = 'Repository root: ' + (project.git_repo_root || project.path);
+      gitInfo.hidden = false;
+    } else if (project && project.git_repo_kind === 'parent') {
+      gitInfo.textContent = project.git_warning || ('Parent repository: ' + project.git_parent_repo_root);
+      gitInfo.hidden = false;
+    } else {
+      gitInfo.textContent = '';
+      gitInfo.hidden = true;
+    }
+  }
   $('#projectDangerActions').hidden = !project;
   show('projectModal');
   setTimeout(() => (project ? $('#p_name') : $('#p_path')).focus(), 30);

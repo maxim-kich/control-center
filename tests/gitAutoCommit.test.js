@@ -112,3 +112,26 @@ test('autoCommitTaskProject skips clean and non-git projects', async (t) => {
   fs.rmSync(repo, { recursive: true, force: true });
   fs.rmSync(noRepo, { recursive: true, force: true });
 });
+
+test('autoCommitTaskProject refuses to commit through a parent repository', async (t) => {
+  if (!gitAvailable()) return t.skip('git is not installed');
+  const parent = makeRepo();
+  const nested = path.join(parent, 'nested-project');
+  fs.mkdirSync(nested, { recursive: true });
+  fs.writeFileSync(path.join(nested, 'feature.txt'), 'nested change\n');
+
+  const result = await autoCommitTaskProject({
+    id: 'task-parent',
+    title: 'Do not touch parent',
+    project_path: nested,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.skipped, 'parent_repo');
+  assert.equal(fs.realpathSync.native(result.parentRepoRoot), fs.realpathSync.native(parent));
+  assert.match(result.warning, /inside a parent Git repository/);
+  assert.equal(git(parent, ['log', '--oneline']).split('\n').length, 1);
+  assert.match(git(parent, ['status', '--porcelain']), /\?\? nested-project\//);
+
+  fs.rmSync(parent, { recursive: true, force: true });
+});

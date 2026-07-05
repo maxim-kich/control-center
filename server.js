@@ -25,6 +25,7 @@ const db = require('./lib/db');
 const codex = require('./lib/codex');
 const { GraphifyManager, graphifyProjectInfo } = require('./lib/graphify');
 const { autoCommitTaskProject } = require('./lib/gitAutoCommit');
+const { hasProjectGit, projectGitApiFields } = require('./lib/gitRoots');
 const { buildHookArgs } = require('./lib/hooksSettings');
 const { ensureSpawnHelper } = require('./lib/ensurePty');
 const updater = require('./lib/core/updater');
@@ -518,7 +519,7 @@ function projectsWithStats() {
     return {
       ...p,
       ...graphify,
-      git_initialized: fs.existsSync(path.join(p.path, '.git')) ? 1 : 0,
+      ...projectGitApiFields(p.path),
       graphify_status: p.graphify_enabled === 0
         ? 'disabled'
         : graphify.graphify_external_running
@@ -532,7 +533,7 @@ function projectsWithStats() {
 }
 
 function ensureGitRepo(projectPath) {
-  if (fs.existsSync(path.join(projectPath, '.git'))) return Promise.resolve(false);
+  if (hasProjectGit(projectPath)) return Promise.resolve(false);
   return new Promise((resolve, reject) => {
     execFile('git', ['init'], { cwd: projectPath, timeout: 30000 }, (err, stdout, stderr) => {
       if (err) {
