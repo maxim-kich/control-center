@@ -103,6 +103,7 @@
             <label class="archive-toggle" title="Include archived tasks on this project board">
               <input type="checkbox" id="projectShowArchive" /> Show archive
             </label>
+            <div id="projectExtensionActions" class="extension-action-group"></div>
             <button id="projectMediaBtn" class="btn btn-sm" type="button" disabled>Media</button>
             <button id="editProjectBtn" class="btn btn-sm" type="button" disabled>✎ Edit</button>
             <button id="newProjectTaskBtn" class="btn btn-primary btn-sm" type="button" disabled>+ New task</button>
@@ -253,6 +254,7 @@
             <div id="extensionsSummary" class="project-path-line">Checking extensions...</div>
           </div>
           <div class="project-canvas-actions">
+            <button id="installExtensionBtn" class="btn btn-primary btn-sm" type="button">Install extension</button>
             <button id="refreshExtensionsBtn" class="btn btn-sm" type="button">Refresh</button>
           </div>
         </header>
@@ -267,6 +269,40 @@
       </section>
     </main>
   </section>
+
+  <div class="modal-overlay" id="extensionInstallModal" hidden>
+    <div class="modal modal-sm">
+      <header class="modal-head">
+        <h3>Install extension</h3>
+        <button class="icon-btn" data-close="extensionInstallModal" type="button">✕</button>
+      </header>
+      <form id="extensionInstallForm" class="form">
+        <label>
+          GitHub or Git URL
+          <input id="extensionInstallSource" placeholder="https://github.com/owner/repo or .../tree/main/path" spellcheck="false" autocomplete="off" />
+          <span class="hint">Use a repository root or a GitHub tree URL for a subfolder.</span>
+        </label>
+        <div class="field-label">Folder upload</div>
+        <div class="upload-row">
+          <label class="btn btn-sm file-picker-label" for="extensionFolderInput">Choose folder</label>
+          <input type="file" id="extensionFolderInput" class="file-picker-input" webkitdirectory directory multiple />
+          <span class="upload-note" id="extensionFolderNote">No folder selected</span>
+        </div>
+        <label>
+          Subfolder <span class="hint">optional for Git repositories</span>
+          <input id="extensionInstallSubdir" placeholder="extensions/my-extension" spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="checkbox yolo-line" title="Replace an installed extension with the same id.">
+          <input type="checkbox" id="extensionInstallOverwrite" /> Replace existing extension
+        </label>
+        <div id="extensionInstallStatus" class="field-note" hidden></div>
+        <div class="form-actions">
+          <button class="btn" type="button" data-close="extensionInstallModal">Cancel</button>
+          <button id="extensionInstallSubmit" class="btn btn-primary" type="submit">Install</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <div class="modal-overlay" id="skillInstallModal" hidden>
     <div class="modal modal-sm">
@@ -331,6 +367,9 @@
 
         <label class="field">Model
           <select id="f_model">
+            <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
+            <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+            <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
             <option value="gpt-5.5" selected>GPT-5.5</option>
             <option value="gpt-5.4">GPT-5.4</option>
             <option value="gpt-5.4-mini">GPT-5.4 mini</option>
@@ -403,6 +442,7 @@
           <input type="checkbox" id="p_git" /> Git <span class="hint">(create repository)</span>
         </label>
         <div class="field-note" id="projectGitInfo" hidden></div>
+        <div id="projectExtensionFields" class="extension-fields"></div>
         <div class="form-actions">
           <div class="form-danger-actions" id="projectDangerActions" hidden>
             <button type="button" class="btn btn-ghost" id="archiveProjectBtn">Archive</button>
@@ -455,6 +495,21 @@
     </div>
   </div>
 
+  <!-- Extension-owned modal surface -->
+  <div class="modal-overlay" id="extensionModal" hidden>
+    <div class="modal modal-md">
+      <header class="modal-head">
+        <div class="modal-head-main">
+          <h3 id="extensionModalTitle">Extension</h3>
+          <div class="conv-meta" id="extensionModalSub"></div>
+        </div>
+        <button class="icon-btn" data-close="extensionModal">✕</button>
+      </header>
+      <div class="extension-modal-body" id="extensionModalBody"></div>
+      <footer class="form-actions" id="extensionModalActions"></footer>
+    </div>
+  </div>
+
   <!-- Tabbed terminal drawer -->
   <div class="drawer" id="drawer" hidden>
     <div class="drawer-resize" id="drawerResize" title="Drag to resize the terminal"></div>
@@ -480,6 +535,7 @@
 
   <script src="/vendor/xterm/lib/xterm.js"></script>
   <script src="/vendor/addon-fit/lib/addon-fit.js"></script>
+  <script src="/extensions-runtime.js?v=publish-1"></script>
   <script src="/app.js?v=publish-1"></script>
 </body>
 </html>

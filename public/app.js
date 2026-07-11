@@ -104,6 +104,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 const EFFORT_LABELS = ['Low', 'Medium', 'High', 'X-High'];
 const MODEL_LABELS = {
+  'gpt-5.6-sol': 'GPT-5.6 Sol',
+  'gpt-5.6-terra': 'GPT-5.6 Terra',
+  'gpt-5.6-luna': 'GPT-5.6 Luna',
   'gpt-5.5': 'GPT-5.5',
   'gpt-5.4': 'GPT-5.4',
   'gpt-5.4-mini': 'GPT-5.4 mini',
@@ -158,6 +161,9 @@ let quittingServer = false;
 let generalSettingsSaving = false;
 let updateCheckSaving = false;
 let updateActionSaving = null;
+let extensionInstallSaving = false;
+let extensionInstallMessage = '';
+let extensionInstallFiles = [];
 let skillActionSaving = null;
 let archivedCache = [];
 let tabsRestored = false; // one-shot guard: re-open live terminals on the first page load
@@ -397,7 +403,78 @@ function renderProjectHeaderBadges(project) {
   return [
     gitBadge,
     renderGraphifyPill(project, { action: true }),
+    ...renderExtensionNodes('projectBadges', { project }, 'project-header'),
   ].filter(Boolean);
+}
+
+function extensionRuntime() {
+  return window.ControlCenterExtensions || null;
+}
+
+function extensionRenderVersion() {
+  const runtime = extensionRuntime();
+  return runtime ? runtime.renderVersion || 0 : 0;
+}
+
+function appExtensionContext(extra) {
+  return {
+    h,
+    api,
+    toast,
+    tasks: TASKS,
+    projects: PROJECTS,
+    selectedProject: selectedProject(),
+    workspaceRoot,
+    ...(extra || {}),
+  };
+}
+
+function renderExtensionNodes(kind, context, slot) {
+  const runtime = extensionRuntime();
+  if (!runtime) return [];
+  try {
+    return runtime.render(kind, appExtensionContext(context), slot);
+  } catch (e) {
+    toast('Extension render failed: ' + e.message, { err: true });
+    return [];
+  }
+}
+
+async function invokeExtensionContributions(kind, method, context, slot) {
+  const runtime = extensionRuntime();
+  if (!runtime) return [];
+  return runtime.invoke(kind, method, appExtensionContext(context), slot);
+}
+
+function extensionModalNodes(content) {
+  if (content == null || content === false) return [];
+  if (Array.isArray(content)) return content.flatMap(extensionModalNodes);
+  if (content.nodeType) return [content];
+  return [document.createTextNode(String(content))];
+}
+
+function openExtensionModal(opts) {
+  opts = opts || {};
+  $('#extensionModalTitle').textContent = opts.title || 'Extension';
+  $('#extensionModalSub').textContent = opts.subtitle || '';
+  $('#extensionModalSub').hidden = !opts.subtitle;
+  $('#extensionModalBody').replaceChildren(...extensionModalNodes(opts.body || opts.content));
+  $('#extensionModalActions').replaceChildren(...extensionModalNodes(opts.actions));
+  show('extensionModal');
+}
+
+function configureExtensionRuntimeHost() {
+  const runtime = extensionRuntime();
+  if (!runtime) return;
+  runtime.setHostApi({
+    h,
+    toast,
+    refresh,
+    loadProjects,
+    renderBoard,
+    openModal: openExtensionModal,
+    closeModal: () => hide('extensionModal'),
+  });
 }
 
 async function refresh(force) {
@@ -472,6 +549,7 @@ function boardSignature() {
     showArchive,
     projectFilter,
     selectedProjectId,
+    extensionRenderVersion: extensionRenderVersion(),
     tasks: sigTasks.map(taskBoardSignature),
   });
 }
@@ -559,7 +637,7 @@ function cardRenderSignature(t) {
     const child = byId.get(cid);
     return cid + ':' + (child ? child.title : '');
   }).join(',');
-  return [taskBoardSignature(t), childSig].join('\u001e');
+  return [taskBoardSignature(t), childSig, extensionRenderVersion()].join('\u001e');
 }
 
 function syncCardShell(card, t) {
@@ -677,13 +755,13 @@ function renderCard(t) {
     draggable: 'true',
     dataset: { id: t.id },
     onclick: (ev) => {
-      if (ev.target.closest('button')) return;
+      if (ev.target.closest('button, a, input, label, .extension-ui')) return;
       openDetails(t.id);
     },
   });
 
   card.addEventListener('dragstart', (ev) => {
-    if (ev.target.closest('button, .fork-chip')) {
+    if (ev.target.closest('button, .fork-chip, .extension-ui')) {
       ev.preventDefault();
       return;
     }
@@ -698,6 +776,7 @@ function renderCard(t) {
   tags.append(h('span', { class: 'status-pill st-' + ds }, STATUS_LABELS[ds] || ds));
   if (isFork) tags.append(h('span', { class: 'tag fork' }, '⑂ fork'));
   if (t.children && t.children.length) tags.append(h('span', { class: 'tag parent' }, '⑂ ' + t.children.length));
+  tags.append(...renderExtensionNodes('taskBadges', { task: t }, 'task-card'));
   card.append(tags);
 
   card.append(h('div', { class: 'card-title' }, t.title));
@@ -720,6 +799,7 @@ function renderCard(t) {
     if (t.session_id) actions.append(h('button', { class: 'btn btn-sm', onclick: () => forkTask(t) }, '⑂ Fork'));
     actions.append(h('button', { class: 'btn btn-ghost btn-sm', onclick: () => archiveTask(t) }, 'Archive'));
   }
+  actions.append(...renderExtensionNodes('taskActions', { task: t }, 'task-card'));
   card.append(actions);
 
   if (t.children && t.children.length) {
@@ -1082,7 +1162,12 @@ async function openDetails(taskId) {
   $('#dMeta').textContent = (t.session_id ? 'sid ' + shortId(t.session_id) + ' · ' : '') + displayProject(t.project_path);
   renderDetailBar(t);
   const body = $('#dBody');
-  body.replaceChildren(renderDetailInfo(t), renderPromptSection(t), h('div', { class: 'empty-state' }, t.session_id ? 'Loading session details…' : 'Not started yet — click Start to launch a session.'));
+  body.replaceChildren(
+    renderDetailInfo(t),
+    renderPromptSection(t),
+    ...renderExtensionNodes('taskDetailSections', { task: t }, 'task-detail'),
+    h('div', { class: 'empty-state' }, t.session_id ? 'Loading session details…' : 'Not started yet — click Start to launch a session.'),
+  );
   show('detailsModal');
   if (!t.session_id) return;
   try {
@@ -1094,10 +1179,16 @@ async function openDetails(taskId) {
       renderStats(conv.counts),
       renderSubtasks(conv.subtasks),
       renderAgents(conv.agents),
+      ...renderExtensionNodes('taskDetailSections', { task: t, conversation: conv }, 'task-detail'),
       renderActivity(conv),
     );
   } catch (e) {
-    body.replaceChildren(renderDetailInfo(t), renderPromptSection(t), h('div', { class: 'empty-state' }, 'Session details not available yet: ' + e.message));
+    body.replaceChildren(
+      renderDetailInfo(t),
+      renderPromptSection(t),
+      ...renderExtensionNodes('taskDetailSections', { task: t }, 'task-detail'),
+      h('div', { class: 'empty-state' }, 'Session details not available yet: ' + e.message),
+    );
   }
 }
 
@@ -1804,6 +1895,12 @@ $('#skillInstallForm').addEventListener('submit', submitSkillInstall);
 for (const btn of document.querySelectorAll('[data-skill-category]')) {
   btn.addEventListener('click', () => setSkillCategoryCollapsed(btn.dataset.skillCategory, !skillCategoryCollapsed[btn.dataset.skillCategory]));
 }
+$('#installExtensionBtn').addEventListener('click', openExtensionInstallModal);
+$('#extensionInstallForm').addEventListener('submit', submitExtensionInstall);
+$('#extensionFolderInput').addEventListener('change', (ev) => {
+  extensionInstallFiles = [...(ev.currentTarget.files || [])];
+  renderExtensionInstallState();
+});
 $('#refreshExtensionsBtn').addEventListener('click', loadExtensions);
 for (const btn of document.querySelectorAll('[data-settings-section]')) {
   btn.addEventListener('click', () => setSettingsSection(btn.dataset.settingsSection));
@@ -1928,6 +2025,15 @@ function renderProjectsPage() {
   $('#projectMediaBtn').disabled = !project;
   $('#editProjectBtn').disabled = !project;
   $('#newProjectTaskBtn').disabled = !project;
+  renderProjectExtensionActions(project);
+}
+
+function renderProjectExtensionActions(project) {
+  const host = $('#projectExtensionActions');
+  if (!host) return;
+  host.replaceChildren();
+  if (!project) return;
+  host.append(...renderExtensionNodes('projectActions', { project }, 'project-header'));
 }
 
 function setSettingsSection(section, opts) {
@@ -2414,14 +2520,218 @@ async function submitSkillInstall(ev) {
   }
 }
 
+function openExtensionInstallModal() {
+  extensionInstallFiles = [];
+  $('#extensionInstallSource').value = '';
+  $('#extensionInstallSubdir').value = '';
+  $('#extensionInstallOverwrite').checked = false;
+  $('#extensionFolderInput').value = '';
+  $('#extensionInstallStatus').hidden = true;
+  $('#extensionInstallSubmit').disabled = false;
+  renderExtensionInstallState();
+  show('extensionInstallModal');
+  setTimeout(() => $('#extensionInstallSource').focus(), 30);
+}
+
+function renderExtensionInstallState() {
+  const note = $('#extensionFolderNote');
+  if (note) {
+    if (extensionInstallFiles.length) {
+      const size = extensionInstallFiles.reduce((sum, file) => sum + file.size, 0);
+      const label = size >= 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${(size / 1024).toFixed(1)} KB`;
+      note.textContent = `${extensionInstallFiles.length} files · ${label}`;
+    } else {
+      note.textContent = 'No folder selected';
+    }
+  }
+  const submit = $('#extensionInstallSubmit');
+  if (submit) submit.disabled = !!extensionInstallSaving;
+  const status = $('#extensionInstallStatus');
+  if (status && extensionInstallSaving) {
+    status.hidden = false;
+    status.textContent = extensionInstallMessage || 'Installing extension...';
+  }
+  renderExtensionsSection();
+}
+
+function readFileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = String(reader.result || '');
+      resolve(raw.includes(',') ? raw.slice(raw.indexOf(',') + 1) : raw);
+    };
+    reader.onerror = () => reject(reader.error || new Error('failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function extensionUploadFilesPayload(files) {
+  const maxBytes = 18 * 1024 * 1024;
+  const maxFiles = 800;
+  if (files.length > maxFiles) throw new Error(`Folder has too many files; maximum is ${maxFiles}`);
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  if (total > maxBytes) throw new Error('Folder is too large for browser upload; use Git install instead.');
+  const out = [];
+  for (const file of files) {
+    out.push({
+      relativePath: file.webkitRelativePath || file.name,
+      contentBase64: await readFileBase64(file),
+    });
+  }
+  return out;
+}
+
+function extensionInstallSuccessMessage(result) {
+  const installed = result && result.installed;
+  const name = installed && (installed.name || installed.id) || 'extension';
+  const restart = installed && installed.restartRequired ? ' Restart to activate extension server routes.' : '';
+  return `Installed ${name}.${restart}`;
+}
+
+async function submitExtensionInstall(ev) {
+  ev.preventDefault();
+  if (extensionInstallSaving) return;
+  const source = $('#extensionInstallSource').value.trim();
+  const subdir = $('#extensionInstallSubdir').value.trim();
+  const overwrite = $('#extensionInstallOverwrite').checked;
+  if (source && extensionInstallFiles.length) return toast('Use either a Git URL or a folder upload, not both.', { err: true });
+  if (!source && !extensionInstallFiles.length) return toast('Choose a folder or enter a Git URL.', { err: true });
+  extensionInstallSaving = true;
+  extensionInstallMessage = source ? 'Cloning extension repository...' : 'Reading extension folder...';
+  renderExtensionInstallState();
+  try {
+    let result;
+    if (source) {
+      extensionInstallMessage = 'Installing extension from Git...';
+      renderExtensionInstallState();
+      result = await api.send('POST', '/api/extensions/install-git', { source, subdir, overwrite });
+    } else {
+      const files = await extensionUploadFilesPayload(extensionInstallFiles);
+      extensionInstallMessage = 'Uploading and installing extension...';
+      renderExtensionInstallState();
+      result = await api.send('POST', '/api/extensions/install-folder', { files, overwrite });
+    }
+    extensionInstallMessage = 'Refreshing installed extensions...';
+    renderExtensionInstallState();
+    hide('extensionInstallModal');
+    await loadExtensions();
+    toast(extensionInstallSuccessMessage(result));
+  } catch (e) {
+    const status = $('#extensionInstallStatus');
+    if (status) {
+      status.hidden = false;
+      status.textContent = e.message;
+    }
+    toast('Extension install failed: ' + e.message, { err: true });
+  } finally {
+    extensionInstallSaving = false;
+    extensionInstallMessage = '';
+    renderExtensionInstallState();
+  }
+}
+
+function renderExtensionInstallingCard() {
+  return h('div', { class: 'extension-card extension-installing-card', 'aria-busy': 'true' },
+    h('div', { class: 'extension-card-head' },
+      h('div', { class: 'extension-installing-main' },
+        h('div', { class: 'extension-installing-title-row' },
+          h('span', { class: 'extension-install-spinner', 'aria-hidden': 'true' }),
+          h('div', { class: 'extension-title' }, 'Installing extension'),
+        ),
+        h('div', { class: 'extension-meta' }, extensionInstallMessage || 'Preparing install...'),
+      ),
+      h('span', { class: 'status-pill st-running' }, 'Installing'),
+    ),
+    h('div', { class: 'extension-skeleton-line extension-skeleton-line-lg' }),
+    h('div', { class: 'extension-skeleton-line' }),
+    h('div', { class: 'extension-skeleton-row' },
+      h('span', { class: 'extension-skeleton-chip' }),
+      h('span', { class: 'extension-skeleton-chip' }),
+      h('span', { class: 'extension-skeleton-chip extension-skeleton-chip-sm' }),
+    ),
+  );
+}
+
 function extensionItemList(title, items) {
   if (!items || !items.length) return null;
   return h('div', { class: 'extension-items' },
     h('div', { class: 'extension-items-title' }, title),
-    ...items.map((item) =>
-      h('a', { href: item.url || '#', target: '_blank', rel: 'noreferrer' }, item.title || item.id),
-    ),
+    ...items.map((item) => {
+      const label = item.title || item.label || item.name || item.path || item.id;
+      return item.url
+        ? h('a', { href: item.url, target: '_blank', rel: 'noreferrer' }, label)
+        : h('code', {}, label);
+    }),
   );
+}
+
+function extensionCapabilities(ext) {
+  const contributes = ext.contributes || {};
+  const hooks = new Set((ext.hooks || []).map((hook) => hook.name));
+  const capabilities = [];
+  const add = (label) => {
+    if (!capabilities.includes(label)) capabilities.push(label);
+  };
+  if (hooks.has('task.completed') || hooks.has('task.statusChanged')) add('Tracks task activity');
+  if (hooks.has('project.metadata')) add('Adds project insights');
+  if (hooks.has('git.autoCommitPolicy')) add('Can manage automatic commits');
+  if ((contributes.projectFields || []).length) add('Adds project settings');
+  if ((contributes.projectBadges || []).length && (contributes.taskBadges || []).length) add('Shows project and task badges');
+  else if ((contributes.projectBadges || []).length) add('Shows project badges');
+  else if ((contributes.taskBadges || []).length) add('Shows task badges');
+  if ((contributes.projectActions || []).length) add('Adds project actions');
+  if ((contributes.taskActions || []).length) add('Adds task actions');
+  if ((contributes.taskDetailSections || []).length) add('Adds task details');
+  if ((contributes.settingsPanels || []).length) add('Adds extension settings');
+  if ((ext.routes || []).length) add('Provides local integrations');
+  return capabilities;
+}
+
+function extensionContributionCount(ext) {
+  return Object.values(ext.contributes || {}).reduce((sum, items) => sum + (Array.isArray(items) ? items.length : 0), 0);
+}
+
+function extensionDeveloperDetails(ext) {
+  const scripts = (ext.frontend && ext.frontend.scripts) || [];
+  const styles = (ext.frontend && ext.frontend.styles) || [];
+  const facts = [
+    `ID ${ext.id}`,
+    `API v${ext.apiVersion || 1}`,
+    `${(ext.hooks || []).length} hooks`,
+    `${extensionContributionCount(ext)} UI contributions`,
+    `${scripts.length + styles.length} assets`,
+    `${(ext.routes || []).length} routes`,
+  ];
+  return h('details', { class: 'extension-developer-details' },
+    h('summary', {}, 'Developer details'),
+    h('div', { class: 'extension-developer-facts' }, ...facts.map((fact) => h('span', {}, fact))),
+    extensionItemList('Permissions', (ext.permissions || []).map((name) => ({ name }))),
+    extensionItemList('Lifecycle hooks', ext.hooks),
+    extensionItemList('Frontend assets', [...scripts, ...styles]),
+    extensionItemList('Settings panels', ext.settingsPanels),
+    extensionItemList('Task detail sections', ext.taskDetailSections),
+    extensionItemList('Project actions', ext.projectActions),
+    extensionItemList('Project fields', ext.contributes && ext.contributes.projectFields),
+    extensionItemList('Project badges', ext.contributes && ext.contributes.projectBadges),
+    extensionItemList('Task actions', ext.contributes && ext.contributes.taskActions),
+    extensionItemList('Task badges', ext.contributes && ext.contributes.taskBadges),
+    extensionItemList('Modals', ext.contributes && ext.contributes.modals),
+    ext.routes && ext.routes.length ? extensionItemList('API routes', ext.routes.map((route) => ({ name: route.mount || route.path }))) : null,
+  );
+}
+
+function configureExtension(ext) {
+  const settingsPanel = (ext.settingsPanels || []).find((item) => item.url);
+  if (settingsPanel) window.open(settingsPanel.url, '_blank', 'noopener,noreferrer');
+}
+
+function extensionCanConfigure(ext) {
+  return !!(ext.settingsPanels || []).some((item) => item.url);
+}
+
+function extensionUsesProjectSettings(ext) {
+  return !!(ext.contributes && ext.contributes.projectFields && ext.contributes.projectFields.length);
 }
 
 function renderExtensionsSection() {
@@ -2431,13 +2741,19 @@ function renderExtensionsSection() {
   if (!summary || !grid || !conflictList) return;
   const extensions = EXTENSION_SETTINGS.extensions || [];
   const conflicts = EXTENSION_SETTINGS.conflicts || [];
-  summary.textContent = `${extensions.length} installed · ${conflicts.length} conflicts · ${EXTENSION_SETTINGS.extensionsDir || 'extension directory unavailable'}`;
+  const lifecycleFailures = (EXTENSION_SETTINGS.lifecycleDiagnostics || []).filter((item) => item.ok === false || item.type === 'policy-conflict');
+  const issueCount = conflicts.length + lifecycleFailures.length;
+  summary.textContent = `${extensions.length} installed · ${issueCount ? `${issueCount} need attention` : 'All healthy'}${extensionInstallSaving ? ' · Installing...' : ''}`;
   grid.replaceChildren();
-  if (!extensions.length) {
+  if (extensionInstallSaving) grid.append(renderExtensionInstallingCard());
+  if (!extensions.length && !extensionInstallSaving) {
     grid.append(h('div', { class: 'empty-state' }, 'No extensions installed.'));
-  } else {
+  }
+  if (extensions.length) {
     for (const ext of extensions) {
-      const status = ext.enabled ? 'Enabled' : 'Disabled';
+      const status = ext.enabled ? 'Enabled' : 'Needs attention';
+      const capabilities = extensionCapabilities(ext);
+      const extensionIssues = lifecycleFailures.filter((issue) => issue.extensionId === ext.id);
       grid.append(
         h('div', { class: 'extension-card' },
           h('div', { class: 'extension-card-head' },
@@ -2449,20 +2765,29 @@ function renderExtensionsSection() {
           ),
           ext.description ? h('div', { class: 'extension-description' }, ext.description) : null,
           ext.errors && ext.errors.length ? h('div', { class: 'extension-error' }, ext.errors.join(' · ')) : null,
-          extensionItemList('Settings panels', ext.settingsPanels),
-          extensionItemList('Task detail sections', ext.taskDetailSections),
-          extensionItemList('Project actions', ext.projectActions),
-          ext.routes && ext.routes.length ? h('div', { class: 'extension-items' },
-            h('div', { class: 'extension-items-title' }, 'API routes'),
-            ...ext.routes.map((route) => h('code', {}, route.mount || route.path)),
-          ) : null,
+          extensionIssues.length ? h('div', { class: 'extension-error' }, `${extensionIssues.length} lifecycle issue${extensionIssues.length === 1 ? '' : 's'}`) : null,
+          capabilities.length
+            ? h('div', { class: 'extension-capabilities' },
+                h('div', { class: 'extension-capabilities-title' }, 'What it does'),
+                h('div', { class: 'extension-capability-list' }, ...capabilities.map((label) => h('span', {}, label))),
+              )
+            : h('div', { class: 'extension-capabilities-empty' }, 'No user-facing features declared.'),
+          h('div', { class: 'extension-card-actions' },
+            extensionCanConfigure(ext)
+              ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => configureExtension(ext) }, 'Configure')
+              : null,
+            extensionUsesProjectSettings(ext)
+              ? h('span', { class: 'extension-scope-note' }, 'Configured per project')
+              : null,
+          ),
+          extensionDeveloperDetails(ext),
         ),
       );
     }
   }
 
   conflictList.replaceChildren();
-  if (!conflicts.length) {
+  if (!conflicts.length && !lifecycleFailures.length) {
     conflictList.append(h('div', { class: 'empty-state' }, 'No extension conflicts detected.'));
   } else {
     for (const conflict of conflicts) {
@@ -2472,16 +2797,28 @@ function renderExtensionsSection() {
         h('span', {}, label),
       ));
     }
+    for (const issue of lifecycleFailures) {
+      conflictList.append(h('div', { class: 'extension-conflict' },
+        h('strong', {}, issue.type === 'policy-conflict' ? 'policy-conflict' : (issue.timedOut ? 'hook-timeout' : 'hook-error')),
+        h('span', {}, issue.hook || issue.extensionId || issue.error || 'lifecycle hook'),
+      ));
+    }
   }
 }
 
-async function loadExtensions() {
+async function loadExtensions(opts) {
+  opts = opts || {};
   try {
     EXTENSION_SETTINGS = await api.get('/api/extensions');
+    configureExtensionRuntimeHost();
+    const runtime = extensionRuntime();
+    if (runtime) await runtime.configure(EXTENSION_SETTINGS);
+    cardCaches.clear();
     renderExtensionsSection();
+    renderBoard();
   } catch (e) {
     const summary = $('#extensionsSummary');
-    if (summary) summary.textContent = e.message;
+    if (summary && !opts.quiet) summary.textContent = e.message;
   }
 }
 
@@ -2659,8 +2996,16 @@ function openProjectModal(project) {
     }
   }
   $('#projectDangerActions').hidden = !project;
+  renderProjectExtensionFields(project);
   show('projectModal');
   setTimeout(() => (project ? $('#p_name') : $('#p_path')).focus(), 30);
+}
+
+function renderProjectExtensionFields(project) {
+  const host = $('#projectExtensionFields');
+  if (!host) return;
+  host.replaceChildren();
+  host.append(...renderExtensionNodes('projectFields', { project, form: $('#projectForm') }, 'project-form'));
 }
 
 $('#projectForm').addEventListener('submit', async (ev) => {
@@ -2678,6 +3023,11 @@ $('#projectForm').addEventListener('submit', async (ev) => {
     const saved = id
       ? await api.send('PATCH', `/api/projects/${id}`, body)
       : await api.send('POST', '/api/projects', body);
+    try {
+      await invokeExtensionContributions('projectFields', 'save', { project: saved, form: $('#projectForm'), values: body }, 'project-form');
+    } catch (e) {
+      toast('Project saved; extension settings failed: ' + e.message, { err: true });
+    }
     selectedProjectId = saved.id;
     hide('projectModal');
     await loadProjects();
@@ -3123,6 +3473,14 @@ const notifier = {
 document.addEventListener('toggle', (ev) => {
   if (ev.target && ev.target.matches && ev.target.matches('[data-project-section]')) persistUiState();
 }, true);
+window.addEventListener('control-center-extension-registered', () => {
+  cardCaches.clear();
+  renderBoard();
+});
+window.addEventListener('control-center-extensions-ready', () => {
+  cardCaches.clear();
+  renderBoard();
+});
 window.addEventListener('beforeunload', persistUiState);
 
 /* ----------------------------------------------------------------- boot */
@@ -3132,6 +3490,8 @@ async function init() {
   notifier.init();
   await loadHealth();
   restoreUiStateForBoot();
+  restoreLoadingStep('Loading extensions...');
+  await loadExtensions({ quiet: true });
   restoreLoadingStep('Loading projects...');
   await loadProjects();
   if (showArchive) {
@@ -3162,7 +3522,7 @@ init().catch((e) => {
   refresh(true);
 });
 setInterval(() => {
-  if ($('#taskModal').hidden && $('#detailsModal').hidden && $('#mediaModal').hidden && $('#skillInstallModal').hidden) refresh();
+  if ($('#taskModal').hidden && $('#detailsModal').hidden && $('#mediaModal').hidden && $('#skillInstallModal').hidden && $('#extensionInstallModal').hidden && $('#extensionModal').hidden) refresh();
   else tabs.sync();
   if (currentPage === 'projects' && !shouldDeferBoardRender()) loadProjects();
   if (!$('#drawer').hidden && tabs.activeId) tabs.refreshUsage();
