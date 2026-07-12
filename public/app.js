@@ -1038,7 +1038,7 @@ function activeProviderInfo() {
   return (MODEL_CONNECTIONS.providers || []).find((p) => p.active) || (MODEL_CONNECTIONS.providers || [])[0] || {
     id: 'codex',
     name: 'Codex',
-    defaultModel: 'gpt-5.5',
+    defaultModel: 'gpt-5.6-sol',
     models: Object.entries(MODEL_LABELS).filter(([id]) => id.startsWith('gpt-')).map(([id, label]) => ({ id, label })),
     modes: ['build', 'plan'],
     supports: { ultracode: false },
@@ -1049,7 +1049,7 @@ function syncTaskProviderControls(task) {
   const provider = task && task.provider
     ? (MODEL_CONNECTIONS.providers || []).find((p) => p.id === task.provider) || activeProviderInfo()
     : activeProviderInfo();
-  const models = provider.models && provider.models.length ? provider.models : [{ id: provider.defaultModel || 'gpt-5.5', label: modelLabel(provider.defaultModel || 'gpt-5.5') }];
+  const models = provider.models && provider.models.length ? provider.models : [{ id: provider.defaultModel || 'gpt-5.6-sol', label: modelLabel(provider.defaultModel || 'gpt-5.6-sol') }];
   const select = $('#f_model');
   select.replaceChildren(...models.map((m) => h('option', { value: m.id }, m.label || modelLabel(m.id))));
   select.value = task ? task.model : provider.defaultModel || models[0].id;

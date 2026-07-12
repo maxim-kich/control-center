@@ -60,6 +60,8 @@ test('tasks track when they enter their current column', async () => {
     project_path: tmp,
   });
 
+  assert.equal(task.model, 'gpt-5.6-sol');
+  assert.equal(task.effort, 'medium');
   assert.equal(task.column_changed_at, task.created_at);
 
   await sleep(5);
@@ -110,7 +112,7 @@ test('migration backup is skipped when the database exceeds the backup byte budg
     CC_DB_BACKUP_RETENTION_COUNT: '2',
     CC_DB_BACKUP_MAX_TOTAL_BYTES: '1',
   });
-  assert.equal(db.getTask('legacy-task').model, 'gpt-5.5');
+  assert.equal(db.getTask('legacy-task').model, 'gpt-5.6-sol');
   db.db.close();
 
   assert.deepEqual(backupNames(tmp), []);
@@ -273,6 +275,33 @@ test('started archived and non-backlog tasks remain archive-only', () => {
     assert.throws(() => db.deleteTask(task.id), /Only unstarted backlog tasks can be deleted/);
     assert.equal(db.getTask(task.id).id, task.id);
   }
+
+  db.db.close();
+});
+
+test('extension state stores scoped JSON values without project columns', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-extension-state-'));
+  const db = loadDb(path.join(tmp, 'tasks.db'));
+
+  const state = db.setExtensionState('project-flags', 'project', 'project-1', {
+    important: true,
+    note: 'Example note',
+  });
+  assert.deepEqual(state, {
+    important: true,
+    note: 'Example note',
+  });
+
+  const next = db.setExtensionStateValue('project-flags', 'project', 'project-1', 'lastStatus', { ok: true });
+  assert.deepEqual(next.lastStatus, { ok: true });
+  assert.deepEqual(db.listExtensionState('project-flags', 'project', 'project-1'), next);
+
+  const deleted = db.deleteExtensionStateValue('project-flags', 'project', 'project-1', 'important');
+  assert.equal(deleted.important, undefined);
+  assert.equal(deleted.note, 'Example note');
+
+  assert.throws(() => db.listExtensionState('project-flags', 'workspace', 'project-1'), /invalid extension state scope/);
+  assert.throws(() => db.setExtensionStateValue('project-flags', 'project', 'project-1', '../bad', true), /invalid extension state key/);
 
   db.db.close();
 });

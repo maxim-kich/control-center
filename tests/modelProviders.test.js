@@ -34,6 +34,7 @@ test('model provider discovery separates connection state from usage state', () 
   assert.equal(codex.connected, true);
   assert.equal(codex.active, true);
   assert.equal(codex.usageDisabled, false);
+  assert.equal(codex.defaultModel, 'gpt-5.6-sol');
   assert.deepEqual(codex.models.slice(0, 3), [
     { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
     { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },

@@ -39,7 +39,7 @@ test('codex buildArgs maps task settings to interactive CLI args', () => {
     skipPermissions: true,
   });
   assert.equal(plan[plan.length - 1], '/plan think first');
-  assert.ok(plan.includes('gpt-5.5'));
+  assert.ok(plan.includes('gpt-5.6-sol'));
   assert.ok(plan.includes('model_reasoning_effort="xhigh"'));
   assert.ok(!plan.includes('--dangerously-bypass-approvals-and-sandbox'));
 
