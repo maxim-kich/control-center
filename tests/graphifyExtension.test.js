@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -83,6 +84,17 @@ function loadGraphifyExtension(db, tmp, opts = {}) {
     db,
     bundledDir: path.join(ROOT, 'bundled-extensions'),
     extensionsDir,
+    providerSetup: ({ providerId, project, opts: setupOpts }) => {
+      const action = setupOpts && setupOpts.action === 'cleanup' ? 'uninstall' : 'install';
+      const result = spawnSync(process.env.CC_GRAPHIFY_BIN, [action, '--project', '--platform', providerId], {
+        cwd: project.path,
+        encoding: 'utf8',
+      });
+      return {
+        ok: result.status === 0,
+        error: result.error ? result.error.message : result.stderr,
+      };
+    },
   });
   platform.prepare();
   platform.installBundled('graphify', { enable: true });
