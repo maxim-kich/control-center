@@ -129,13 +129,59 @@ User-owned extensions live outside the app checkout:
 
 ```text
 ~/.control-center/extensions/<extension-id>/
-  extension.yaml
+  extension.json
   server.js
   public/
   migrations/
 ```
 
-The app discovers settings panels, task detail sections, project actions, declared migrations, static assets, and local API routes under `/api/extensions/<extension-id>/`. A copyable sample is in `examples/extensions/status-panel`.
+The app discovers settings panels, task detail sections, project fields, project and task actions, badges, modals, lifecycle hooks, declared migrations, static assets, and local API routes under `/api/extensions/<extension-id>/`. Static frontend assets are served only from `/extensions/<extension-id>/` and are loaded by the core runtime only when declared in the manifest.
+
+Rich UI extensions should use `extension.json` with explicit permissions:
+
+```json
+{
+  "id": "project-flags",
+  "permissions": ["ui:frontend", "ui:project-fields", "ui:project-actions", "api:extension-state"],
+  "frontend": {
+    "scripts": [{ "path": "inline-ui.js" }],
+    "styles": [{ "path": "inline-ui.css" }]
+  },
+  "contributes": {
+    "projectFields": [{ "id": "important-project", "title": "Important project" }],
+    "projectActions": [{ "id": "open-project-note", "title": "Open note" }]
+  }
+}
+```
+
+Extension scripts register handlers through `window.ControlCenterExtensions.register(<id>, handlers)`. Extension-owned state is stored through `/api/extensions/<extension-id>/state` and is scoped by extension id, scope type, scope id, and key, so plugins do not need core project columns. Copyable samples are in `examples/extensions/status-panel` and `examples/extensions/project-flags`.
+
+Backend extensions can declare provider-neutral lifecycle hooks with the `hooks:lifecycle` permission:
+
+```json
+{
+  "permissions": ["hooks:lifecycle", "api:extension-state"],
+  "hooks": {
+    "task.completed": { "order": 100, "timeoutMs": 2000 },
+    "project.metadata": { "order": 100 },
+    "git.autoCommitPolicy": { "order": 100 }
+  }
+}
+```
+
+Export matching handlers from `server.js` as `exports.hooks`. Handlers receive a normalized event context containing Control Center task, project, previous-value, patch, and provider data, plus a scoped capability API with extension state and logging. Supported hooks are `app.started`, `app.stopping`, `task.statusChanged`, `task.completed`, `project.created`, `project.updated`, `project.archived`, `project.unarchived`, `project.deleted`, `project.metadata`, `git.autoCommitPolicy`, `update.checking`, `update.checked`, `migration.before`, and `migration.after`.
+
+Hooks run serially by ascending `order`, then extension ID. The default timeout is five seconds and failures are isolated and reported in Settings. Notification and metadata failures are fail-open. Auto-commit policy handlers return `allow`, `deny`, or `abstain`; deny wins, and contradictory allow/deny decisions are reported as conflicts.
+
+Backend extension code is trusted code loaded in the Control Center Node.js process. Install only extensions whose source you trust. Lifecycle handlers receive scoped capabilities, but frontend assets and optional route modules are not sandboxed.
+
+`examples/extensions/task-journal` is the lifecycle reference. It records task status changes and completed tasks from both Codex and Claude Code, enriches project metadata, provides journal checkpoints, and can suppress automatic task commits when manual checkpoints are enabled.
+
+Install extensions from `Settings -> Extensions -> Install extension` by choosing an extension folder or entering a GitHub/Git URL. GitHub tree URLs can point at a subfolder, and the installer copies the detected extension into `~/.control-center/extensions/<extension-id>/`. Frontend-only extensions become available after the install refresh; extensions with `server.js` may need a restart before their local API routes are active.
+
+First-party optional extensions can also ship inside the application image under `bundled-extensions/`. Control Center catalogs those folders without network access, copies a selected bundle into the instance-owned extensions directory, keeps it disabled until explicitly enabled, compares semantic versions for upgrades, and retains the immediately previous bundle for file rollback. Enablement, installed versions, applied migration IDs, and rollback metadata persist in the instance database. SQL migrations run transactionally and require `migrations:run`; rolling back extension files does not reverse an already-applied data migration.
+
+Managed backend permissions are `git:read`, `git:write`, `process:managed`, `providers:setup`, `health:checks`, and `migrations:run`. Side-effecting managed calls additionally require an `ownership:<domain>` permission and a matching `ownership` declaration; ownership extensions must include a backend and health-check permission. The compatibility domains in this release are `graphify` and `git`. Each domain has one persisted preferred owner and one active owner; `legacy` is the default and automatic fallback when the preferred extension is disabled, missing, invalid, duplicated, or unhealthy. The legacy Graphify and Git paths check this active owner before every side effect, so core and an extension cannot both write the same domain. The catalog, permission decisions, ownership/fallback state, health results, and managed process status are visible at `/api/extensions/diagnostics` and in `/api/health`.
 
 Update and rollback commands scan extensions first. Duplicate extension IDs, route declarations, migration IDs, or UI slots stop the operation unless `--allow-extension-conflicts` is passed.
 
