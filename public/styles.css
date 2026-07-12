@@ -599,6 +599,19 @@ body.restore-loading-active > :not(.restore-loading) {
   white-space: pre-wrap;
 }
 .project-canvas-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.extension-action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.extension-fields {
+  display: grid;
+  gap: 8px;
+}
+.extension-fields:empty,
+.extension-action-group:empty { display: none; }
+.extension-ui { flex: 0 0 auto; }
 .project-board-scroll { padding-top: 12px; }
 .project-board-scroll .board { padding: 0; }
 
@@ -817,6 +830,130 @@ body.restore-loading-active > :not(.restore-loading) {
   line-height: 1.35;
 }
 .extension-error { color: var(--danger); }
+.extension-capabilities {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.extension-capabilities-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.extension-capability-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.extension-capability-list span {
+  color: var(--text);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 11.5px;
+  line-height: 1.25;
+}
+.extension-capabilities-empty {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.extension-card-actions {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.extension-card-actions:empty { display: none; }
+.extension-scope-note {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.extension-developer-details {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+}
+.extension-developer-details summary {
+  width: fit-content;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11.5px;
+  user-select: none;
+}
+.extension-developer-details[open] summary { color: var(--text); }
+.extension-developer-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  margin-top: 9px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.extension-installing-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(68, 147, 248, 0.45);
+  background: linear-gradient(180deg, rgba(68, 147, 248, 0.09), var(--panel));
+}
+.extension-installing-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+  animation: extension-shimmer 1.35s linear infinite;
+  pointer-events: none;
+}
+.extension-installing-main { min-width: 0; }
+.extension-installing-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.extension-install-spinner {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(68, 147, 248, 0.28);
+  border-top-color: var(--blue);
+  border-radius: 999px;
+  animation: extension-spin 0.8s linear infinite;
+}
+.extension-skeleton-line,
+.extension-skeleton-chip {
+  display: block;
+  border-radius: 999px;
+  background: rgba(139, 148, 158, 0.18);
+}
+.extension-skeleton-line {
+  height: 8px;
+  width: 58%;
+  margin-top: 14px;
+}
+.extension-skeleton-line-lg { width: 82%; }
+.extension-skeleton-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+.extension-skeleton-chip {
+  width: 72px;
+  height: 22px;
+}
+.extension-skeleton-chip-sm { width: 46px; }
+@keyframes extension-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes extension-shimmer {
+  to { transform: translateX(100%); }
+}
 .extension-items {
   display: flex;
   gap: 6px;
@@ -1146,6 +1283,17 @@ body.restore-loading-active > :not(.restore-loading) {
 .modal-head h3 { margin: 0; font-size: 15px; }
 .modal-head-main { min-width: 0; }
 .modal-head-actions { display: flex; align-items: center; gap: 10px; }
+.extension-modal-body {
+  min-height: 120px;
+  overflow: auto;
+  padding: 14px;
+}
+.migration-details pre {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* ---------- form ---------- */
 .form { padding: 18px; display: flex; flex-direction: column; gap: 14px; overflow: auto; }

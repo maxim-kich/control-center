@@ -192,6 +192,7 @@
           <button id="dryRunUpdateBtn" class="btn btn-sm" type="button">Dry run</button>
           <button id="applyUpdateBtn" class="btn btn-sm primary" type="button">Update</button>
           <button id="rollbackUpdateBtn" class="btn btn-sm" type="button">Rollback</button>
+          <button id="migrationWelcomeBtn" class="btn btn-sm" type="button">Integration notes</button>
           <span id="versionStatus" class="settings-toggle-note">Update status unavailable</span>
         </div>
       </section>
@@ -435,10 +436,10 @@
         <label>Description
           <textarea id="p_description" rows="3" placeholder="Small project description..."></textarea>
         </label>
-        <label class="checkbox yolo-line" title="Install project-scoped Graphify for Codex and refresh the code graph automatically.">
+        <label class="checkbox yolo-line" id="projectGraphifyLegacyField" title="Install project-scoped Graphify for Codex and refresh the code graph automatically.">
           <input type="checkbox" id="p_graphify" checked /> Graphify <span class="hint">(auto-update code graph)</span>
         </label>
-        <label class="checkbox yolo-line" title="Initialize a Git repository in the project folder when saved.">
+        <label class="checkbox yolo-line" id="projectGitLegacyField" title="Initialize a Git repository in the project folder when saved.">
           <input type="checkbox" id="p_git" /> Git <span class="hint">(create repository)</span>
         </label>
         <div class="field-note" id="projectGitInfo" hidden></div>

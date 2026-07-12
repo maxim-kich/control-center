@@ -99,7 +99,7 @@ async function main() {
   }
 
   if (cmd === 'update') {
-    const result = updater.updateGitCheckout({
+    const result = await updater.updateGitCheckout({
       root: ROOT,
       appHome: home,
       dbPath,

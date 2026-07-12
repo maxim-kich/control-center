@@ -1,0 +1,35 @@
+{
+  "apiVersion": 1,
+  "id": "git-workflow",
+  "name": "Git Workflow",
+  "version": "0.1.0",
+  "description": "Provides optional project Git initialization, badges, and task completion auto-commits.",
+  "permissions": [
+    "hooks:lifecycle",
+    "api:extension-state",
+    "ui:frontend",
+    "ui:project-fields",
+    "ui:project-badges",
+    "git:read",
+    "git:write",
+    "health:checks",
+    "ownership:git"
+  ],
+  "ownership": ["git"],
+  "hooks": {
+    "project.updated": { "order": 20, "timeoutMs": 10000 },
+    "project.metadata": { "order": 20, "timeoutMs": 5000 },
+    "task.completed": { "order": 20, "timeoutMs": 30000 }
+  },
+  "frontend": {
+    "scripts": [{ "path": "git-workflow.js" }]
+  },
+  "contributes": {
+    "projectFields": [
+      { "id": "init", "title": "Git", "slot": "project-form", "order": 20 }
+    ],
+    "projectBadges": [
+      { "id": "git-status", "title": "Git status", "slot": "project-header", "order": 20 }
+    ]
+  }
+}

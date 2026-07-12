@@ -183,6 +183,10 @@ First-party optional extensions can also ship inside the application image under
 
 Managed backend permissions are `git:read`, `git:write`, `process:managed`, `providers:setup`, `health:checks`, and `migrations:run`. Side-effecting managed calls additionally require an `ownership:<domain>` permission and a matching `ownership` declaration; ownership extensions must include a backend and health-check permission. The compatibility domains in this release are `graphify` and `git`. Each domain has one persisted preferred owner and one active owner; `legacy` is the default and automatic fallback when the preferred extension is disabled, missing, invalid, duplicated, or unhealthy. The legacy Graphify and Git paths check this active owner before every side effect, so core and an extension cannot both write the same domain. The catalog, permission decisions, ownership/fallback state, health results, and managed process status are visible at `/api/extensions/diagnostics` and in `/api/health`.
 
+This release ships first-party bundled `graphify` and `git-workflow` extensions. The updater performs a read-only usage inspection, persists a migration plan, backs up the database/configuration, installs the bundles offline, imports compatibility state into `extension_state`, validates health, then switches ownership only for domains with prior usage. Failed migration attempts record a ledger and leave the legacy owner active. The post-update introduction screen is keyed by app version and can be reopened from Settings -> General -> Version -> Integration notes.
+
+The legacy Graphify and Git implementations are intentionally retained for one release as fallback owners. They should be removed only after a later release has telemetry or support evidence that migration, rollback, and re-update are stable, compatibility API consumers have moved off legacy-only assumptions, and the release notes have announced the removal boundary.
+
 Update and rollback commands scan extensions first. Duplicate extension IDs, route declarations, migration IDs, or UI slots stop the operation unless `--allow-extension-conflicts` is passed.
 
 ## Verify
@@ -194,6 +198,10 @@ npm run verify:release
 ```
 
 `npm run verify:public` fails if generated/private files, planning notes, known private screenshots, or non-example absolute home paths are tracked or included in the package.
+
+`npm run verify:release` runs the full test suite, public verification, and an isolated bundled-migration dry-run fixture. In a clean release checkout with update targets configured, set `CC_RELEASE_GATE_UPDATE_SMOKE=1` and `CC_RELEASE_GATE_ROLLBACK_SMOKE=1` to include real updater and rollback dry-run smoke checks.
+
+`npm run smoke:release` builds a temporary release remote from `v0.1.0` and the current working tree, creates a previous-schema `CONTROL_CENTER_HOME`, and drives the real updater through update, startup migration, rollback, legacy restart, and re-update. It never updates the development checkout. Set `CC_SMOKE_PREVIOUS_REF` to test another previous release or `CC_SMOKE_KEEP=1` to retain the isolated fixture for debugging.
 
 Optional diagnostics:
 

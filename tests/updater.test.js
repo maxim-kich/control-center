@@ -160,3 +160,199 @@ settingsPanels:
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+function makeBundledMigrationDb(tmp) {
+  const dbPath = path.join(tmp, 'tasks.db');
+  const project = path.join(tmp, 'project');
+  fs.mkdirSync(path.join(project, 'graphify-out'), { recursive: true });
+  fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'graphify-out', 'graph.json'), '{"nodes":[]}\n');
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      path TEXT NOT NULL,
+      archived INTEGER NOT NULL DEFAULT 0,
+      graphify_enabled INTEGER NOT NULL DEFAULT 1,
+      graphify_status TEXT NOT NULL DEFAULT 'current',
+      graphify_last_success_at TEXT,
+      graphify_last_error TEXT,
+      graphify_hook_status TEXT,
+      graphify_dirty_at TEXT
+    );
+    INSERT INTO projects (
+      id, name, path, archived, graphify_enabled, graphify_status,
+      graphify_last_success_at, graphify_hook_status
+    )
+    VALUES (
+      'project-1', 'Project', '${project.replace(/'/g, "''")}', 0, 1, 'current',
+      '2026-01-01T00:00:00.000Z', 'installed'
+    );
+  `);
+  db.close();
+  return { dbPath, project };
+}
+
+test('bundled integration migration dry-run plans without mutating the source database', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-bundled-migration-dry-'));
+  const { dbPath } = makeBundledMigrationDb(tmp);
+  const extensionsDir = path.join(tmp, 'extensions');
+
+  try {
+    const result = await updater.runBundledIntegrationMigration({
+      root: ROOT,
+      appHome: tmp,
+      dbPath,
+      extensionsDir,
+      dryRun: true,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.plan.targets.graphify.targetOwner, 'graphify');
+    assert.equal(result.plan.targets.git.targetOwner, 'git-workflow');
+    assert.equal(fs.existsSync(extensionsDir), false);
+
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      assert.equal(db.prepare(`SELECT name FROM sqlite_master WHERE name = 'app_meta'`).get(), undefined);
+      assert.equal(db.prepare(`SELECT name FROM sqlite_master WHERE name = 'extension_state'`).get(), undefined);
+    } finally {
+      db.close();
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('bundled integration migration installs bundles imports state and is idempotent', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-bundled-migration-'));
+  const { dbPath } = makeBundledMigrationDb(tmp);
+  const extensionsDir = path.join(tmp, 'extensions');
+
+  try {
+    const result = await updater.runBundledIntegrationMigration({
+      root: ROOT,
+      appHome: tmp,
+      dbPath,
+      extensionsDir,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.diagnostics.ownership.graphify.activeOwner, 'graphify');
+    assert.equal(result.diagnostics.ownership.git.activeOwner, 'git-workflow');
+    assert.equal(fs.existsSync(path.join(extensionsDir, 'graphify', 'extension.json')), true);
+    assert.equal(fs.existsSync(path.join(extensionsDir, 'git-workflow', 'extension.json')), true);
+
+    const db = new Database(dbPath);
+    try {
+      const ownership = JSON.parse(db.prepare(`SELECT value FROM app_meta WHERE key = 'extensions.platform.ownership.v1'`).get().value);
+      assert.equal(ownership.domains.graphify.activeOwner, 'graphify');
+      assert.equal(ownership.domains.git.activeOwner, 'git-workflow');
+      const graphifyState = db.prepare(`
+        SELECT value FROM extension_state
+        WHERE extension_id = 'graphify' AND scope_type = 'project' AND scope_id = 'project-1' AND key = 'compatibility'
+      `).get();
+      assert.equal(JSON.parse(graphifyState.value).graphify_status, 'current');
+      const gitState = db.prepare(`
+        SELECT value FROM extension_state
+        WHERE extension_id = 'git-workflow' AND scope_type = 'project' AND scope_id = 'project-1' AND key = 'git'
+      `).get();
+      assert.equal(JSON.parse(gitState.value).git_repo_kind, 'own');
+    } finally {
+      db.close();
+    }
+
+    const rerun = await updater.runBundledIntegrationMigration({
+      root: ROOT,
+      appHome: tmp,
+      dbPath,
+      extensionsDir,
+    });
+    assert.equal(rerun.alreadyCompleted, true);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('bundled integration migration resumes an interrupted ledger and survives restart', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-bundled-migration-resume-'));
+  const { dbPath } = makeBundledMigrationDb(tmp);
+  const extensionsDir = path.join(tmp, 'extensions');
+  const seed = new Database(dbPath);
+  seed.exec(`CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  seed.prepare(`INSERT INTO app_meta (key, value) VALUES (?, ?)`).run(
+    'updates.bundled_integration_migration.ledger.v1',
+    JSON.stringify({ version: 1, status: 'in_progress', steps: [{ step: 'plan-persisted' }] }),
+  );
+  seed.close();
+
+  try {
+    const result = await updater.runBundledIntegrationMigration({
+      root: ROOT,
+      appHome: tmp,
+      dbPath,
+      extensionsDir,
+    });
+    assert.equal(result.ok, true);
+
+    const { ExtensionPlatform } = require('../lib/core/extensionPlatform');
+    const db = new Database(dbPath);
+    const adapter = {
+      db,
+      getMetaValue(key, fallback = null) {
+        const row = db.prepare(`SELECT value FROM app_meta WHERE key = ?`).get(key);
+        return row ? row.value : fallback;
+      },
+      setMetaValue(key, value) {
+        db.prepare(`
+          INSERT INTO app_meta (key, value) VALUES (?, ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        `).run(key, String(value));
+        return String(value);
+      },
+    };
+    try {
+      const platform = new ExtensionPlatform({
+        db: adapter,
+        bundledDir: path.join(ROOT, 'bundled-extensions'),
+        extensionsDir,
+      });
+      platform.prepare();
+      assert.equal(platform.owner('graphify'), 'graphify');
+      assert.equal(platform.owner('git'), 'git-workflow');
+    } finally {
+      db.close();
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('bundled integration migration records failure ledger and falls back to legacy ownership', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-bundled-migration-fail-'));
+  const { dbPath } = makeBundledMigrationDb(tmp);
+
+  try {
+    await assert.rejects(
+      updater.runBundledIntegrationMigration({
+        root: ROOT,
+        appHome: tmp,
+        dbPath,
+        extensionsDir: path.join(tmp, 'extensions'),
+        bundledDir: path.join(tmp, 'missing-bundles'),
+      }),
+      /bundled extension not found/,
+    );
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      const ledger = JSON.parse(db.prepare(`SELECT value FROM app_meta WHERE key = ?`).get('updates.bundled_integration_migration.ledger.v1').value);
+      assert.equal(ledger.status, 'failed');
+      const ownership = JSON.parse(db.prepare(`SELECT value FROM app_meta WHERE key = ?`).get('extensions.platform.ownership.v1').value);
+      assert.equal(ownership.domains.graphify.activeOwner, 'legacy');
+      assert.equal(ownership.domains.git.activeOwner, 'legacy');
+    } finally {
+      db.close();
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

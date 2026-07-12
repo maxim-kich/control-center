@@ -31,6 +31,7 @@ const { ensureSpawnHelper } = require('./lib/ensurePty');
 const updater = require('./lib/core/updater');
 const { loadExtensions, installExtensionUpload, installExtensionGit } = require('./lib/core/extensions');
 const { ExtensionPlatform } = require('./lib/core/extensionPlatform');
+const migrationWelcome = require('./lib/core/migrationWelcome');
 const skills = require('./lib/skills');
 const { discoverModelProviders, normalizeActiveProvider } = require('./lib/modelProviders');
 const { getProvider } = require('./lib/providers');
@@ -119,9 +120,10 @@ let extensionManager = loadExtensions({
 });
 extensionPlatform.reconcileOwnership(extensionManager.extensions);
 
-function refreshExtensionManager() {
+function refreshExtensionManager(opts = {}) {
   extensionPlatform.prepare();
   extensionManager = loadExtensions({
+    app: opts.mountRoutes ? app : undefined,
     extensionsDir: paths.EXTENSIONS_DIR,
     context: { db, paths, workspaceRoot: WORKSPACE_ROOT },
     platform: extensionPlatform,
@@ -400,6 +402,45 @@ app.post('/api/version/check', async (req, res) => {
   res.json({ version: versionPayload(), updateCheck });
 });
 
+app.get('/api/migration/welcome', (req, res) => {
+  res.json(migrationWelcome.migrationWelcomeStateFromDb({
+    db,
+    appVersion: PACKAGE.version,
+    diagnostics: extensionPlatform.diagnostics(),
+    force: req.query && (req.query.force === '1' || req.query.force === 'true'),
+  }));
+});
+
+app.post('/api/migration/welcome/complete', (req, res) => {
+  const version = req.body && req.body.version;
+  if (!version) return res.status(400).json({ error: 'welcome version is required' });
+  migrationWelcome.markMigrationWelcomeComplete(db, version);
+  res.json({ ok: true, completedVersion: db.getMetaValue(migrationWelcome.COMPLETED_KEY, null) });
+});
+
+app.post('/api/migration/retry', async (req, res) => {
+  try {
+    const result = await updater.runBundledIntegrationMigration({
+      root: ROOT,
+      appHome: paths.APP_HOME,
+      dbPath: db.DB_PATH,
+      backupDir: paths.BACKUP_DIR,
+      extensionsDir: paths.EXTENSIONS_DIR,
+    });
+    extensionPlatform.reloadState();
+    refreshExtensionManager();
+    syncCompatibilityOwnership({ bootstrap: false });
+    res.json({ ok: true, result, welcome: migrationWelcome.migrationWelcomeStateFromDb({
+      db,
+      appVersion: PACKAGE.version,
+      diagnostics: extensionPlatform.diagnostics(),
+      force: true,
+    }) });
+  } catch (e) {
+    res.status(400).json({ error: e && e.message ? e.message : String(e) });
+  }
+});
+
 app.get('/api/extensions', (req, res) => {
   res.json(extensionManager.publicPayload());
 });
@@ -639,8 +680,8 @@ app.post('/api/update/dry-run', async (req, res) => {
   const context = { operation: 'update', dryRun: true, target: req.body && req.body.target };
   try {
     await extensionManager.notify('migration.before', context);
-    const result = updater.updateGitCheckout(updateRequestOptions(req.body || {}, true));
-    await extensionManager.notify('migration.after', { ...context, result: result.migration });
+    const result = await updater.updateGitCheckout(updateRequestOptions(req.body || {}, true));
+    await extensionManager.notify('migration.after', { ...context, result: result.migration, bundledMigration: result.bundledMigration });
     res.json({ ok: true, result, version: versionPayload() });
   } catch (e) {
     await extensionManager.notify('migration.after', { ...context, error: String(e && e.message ? e.message : e) });
@@ -653,8 +694,8 @@ app.post('/api/update/apply', async (req, res) => {
   const context = { operation: 'update', dryRun: false, target: req.body && req.body.target };
   try {
     await extensionManager.notify('migration.before', context);
-    const result = updater.updateGitCheckout(updateRequestOptions(req.body || {}, false));
-    await extensionManager.notify('migration.after', { ...context, result: result.migration });
+    const result = await updater.updateGitCheckout(updateRequestOptions(req.body || {}, false));
+    await extensionManager.notify('migration.after', { ...context, result: result.migration, bundledMigration: result.bundledMigration });
     spawnReplacementServer();
     res.json({ ok: true, restarting: true, result, version: versionPayload(), bootId: BOOT_ID });
     setTimeout(() => shutdown('restart'), 50).unref();
@@ -1026,6 +1067,14 @@ app.post('/api/projects', async (req, res) => {
   runLegacyGraphify('syncProjects', db.listProjects(), { bootstrap: false });
   if (project.graphify_enabled) runLegacyGraphify('enqueue', project.id, 'project-created', { immediate: true });
   const created = db.getProject(project.id);
+  if (b.git_enabled && !legacyOwns('git')) {
+    await extensionManager.notify('project.updated', extensionEventContext({
+      project: created,
+      previous: project,
+      patch: { git_enabled: true },
+      reason: 'git-init-requested',
+    }));
+  }
   await extensionManager.notify('project.created', extensionEventContext({ project: created }));
   res.status(201).json(created);
 });
@@ -1067,7 +1116,12 @@ app.patch('/api/projects/:id', async (req, res) => {
     runLegacyGraphify('enqueue', updated.id, 'project-updated', { immediate: true });
   }
   const result = db.getProject(updated.id);
-  await extensionManager.notify('project.updated', extensionEventContext({ project: result, previous: existing, patch }));
+  await extensionManager.notify('project.updated', extensionEventContext({
+    project: result,
+    previous: existing,
+    patch,
+    reason: (req.body || {}).git_enabled && !legacyOwns('git') ? 'git-init-requested' : null,
+  }));
   res.json(result);
 });
 
@@ -1103,21 +1157,39 @@ app.delete('/api/projects/:id', async (req, res) => {
   res.json({ ok: true, project: deleted });
 });
 
-app.post('/api/projects/:id/graphify', (req, res) => {
+app.post('/api/projects/:id/graphify', async (req, res) => {
   const project = db.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: 'not found' });
   const enabled = project.graphify_enabled !== 0 ? project : db.updateProject(project.id, { graphify_enabled: 1 });
-  runLegacyGraphify('syncProjects', db.listProjects(), { bootstrap: false });
-  runLegacyGraphify('enqueue', enabled.id, 'manual', { immediate: true });
+  if (legacyOwns('graphify')) {
+    runLegacyGraphify('syncProjects', db.listProjects(), { bootstrap: false });
+    runLegacyGraphify('enqueue', enabled.id, 'manual', { immediate: true });
+  } else {
+    await extensionManager.notify('project.updated', extensionEventContext({
+      project: enabled,
+      previous: project,
+      patch: { graphify_enabled: 1 },
+      reason: 'graphify-manual',
+    }));
+  }
   res.json(db.getProject(enabled.id));
 });
 
-app.delete('/api/projects/:id/graphify', (req, res) => {
+app.delete('/api/projects/:id/graphify', async (req, res) => {
   const project = db.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: 'not found' });
   const updated = db.updateProject(project.id, { graphify_enabled: 0 });
-  runLegacyGraphify('disableProject', updated.id, { uninstall: true });
-  runLegacyGraphify('syncProjects', db.listProjects(), { bootstrap: false });
+  if (legacyOwns('graphify')) {
+    runLegacyGraphify('disableProject', updated.id, { uninstall: true });
+    runLegacyGraphify('syncProjects', db.listProjects(), { bootstrap: false });
+  } else {
+    await extensionManager.notify('project.updated', extensionEventContext({
+      project: updated,
+      previous: project,
+      patch: { graphify_enabled: 0 },
+      reason: 'graphify-disabled',
+    }));
+  }
   res.json(db.getProject(updated.id));
 });
 
@@ -1281,7 +1353,16 @@ async function completeTask(taskId) {
     previous: task,
     patch: { status: 'done' },
   }));
-  const policy = await extensionManager.evaluatePolicy('git.autoCommitPolicy', extensionEventContext({ task: updated }));
+  const completionContext = extensionEventContext({ task: updated, previous: task });
+  const scope = taskCommitScope(task);
+  completionContext.gitCommitScope = scope;
+  const policy = await extensionManager.evaluatePolicy('git.autoCommitPolicy', completionContext);
+  completionContext.gitAutoCommitPolicy = {
+    decision: policy.decision,
+    reason: policy.reason,
+    conflict: policy.conflict,
+    decisions: policy.decisions,
+  };
   if (!legacyOwns('git')) {
     updated.git_commit = {
       ok: true,
@@ -1292,7 +1373,6 @@ async function completeTask(taskId) {
     updated.git_commit = { ok: true, skipped: true, reason: policy.reason || 'disabled by extension policy' };
   } else {
     try {
-      const scope = taskCommitScope(task);
       updated.git_commit = await autoCommitTaskProject(task, scope);
     } catch (e) {
       updated.git_commit = {
@@ -1302,7 +1382,16 @@ async function completeTask(taskId) {
     }
   }
   runLegacyGraphify('enqueueByPath', task.project_path, 'task-completed', { immediate: true });
-  await extensionManager.notify('task.completed', extensionEventContext({ task: updated, previous: task }));
+  const completed = await extensionManager.notify('task.completed', completionContext);
+  const gitOwner = extensionPlatform.owner('git');
+  if (gitOwner !== 'legacy') {
+    const gitOutcome = completed.results.find((result) => result.extensionId === gitOwner);
+    if (gitOutcome && gitOutcome.ok && gitOutcome.result && gitOutcome.result.git_commit) {
+      updated.git_commit = gitOutcome.result.git_commit;
+    } else if (gitOutcome && !gitOutcome.ok) {
+      updated.git_commit = { ok: false, owner: gitOwner, error: gitOutcome.error || 'Git Workflow failed' };
+    }
+  }
   return updated;
 }
 
@@ -1659,7 +1748,33 @@ async function shutdown(reason = 'shutdown') {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-server.listen(PORT, HOST, async () => {
+async function bootstrapBundledIntegrations() {
+  try {
+    const result = await updater.runBundledIntegrationMigration({
+      root: ROOT,
+      appHome: paths.APP_HOME,
+      dbPath: db.DB_PATH,
+      backupDir: paths.BACKUP_DIR,
+      extensionsDir: paths.EXTENSIONS_DIR,
+    });
+    if (!result.alreadyCompleted) {
+      extensionPlatform.reloadState();
+      refreshExtensionManager({ mountRoutes: true });
+    }
+    return result;
+  } catch (error) {
+    // Migration records and restores legacy ownership before throwing. Startup
+    // must remain available so the user can retry or continue with fallback.
+    extensionPlatform.reloadState();
+    refreshExtensionManager();
+    console.error('[migration] bundled integration migration failed; using legacy ownership:', error && error.message ? error.message : String(error));
+    return { ok: false, error: error && error.message ? error.message : String(error) };
+  }
+}
+
+async function startServer() {
+  await bootstrapBundledIntegrations();
+  server.listen(PORT, HOST, async () => {
   syncCaffeinate();
   scheduleUpdateCheck();
   const extensionStartup = await extensionManager.notify('app.started', {
@@ -1689,4 +1804,10 @@ server.listen(PORT, HOST, async () => {
   console.log(`  caffeinate: ${caff.enabled ? (caff.active ? `active (pid ${caff.pid})` : (caff.error || 'enabled')) : 'off'}`);
   console.log(`  db: ${db.DB_PATH}`);
   console.log('');
+  });
+}
+
+startServer().catch((error) => {
+  console.error(error && error.stack ? error.stack : String(error));
+  process.exit(1);
 });

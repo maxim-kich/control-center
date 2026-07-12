@@ -23,7 +23,8 @@
     "macos-app": "bash scripts/create_macos_app.sh",
     "test": "node --test tests/*.test.js",
     "verify:public": "node scripts/verify_public.js",
-    "verify:release": "npm test && npm run verify:public",
+    "verify:release": "node scripts/release_gate.js",
+    "smoke:release": "node scripts/isolated_release_smoke.js",
     "check-updates": "node scripts/update.js check",
     "update:dry-run": "node scripts/update.js update --dry-run"
   },

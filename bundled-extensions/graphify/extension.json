@@ -1,0 +1,41 @@
+{
+  "apiVersion": 1,
+  "id": "graphify",
+  "name": "Graphify",
+  "version": "0.1.0",
+  "description": "Maintains project Graphify code graphs as an optional bundled integration.",
+  "permissions": [
+    "hooks:lifecycle",
+    "api:extension-state",
+    "ui:frontend",
+    "ui:project-fields",
+    "ui:project-badges",
+    "process:managed",
+    "providers:setup",
+    "health:checks",
+    "ownership:graphify"
+  ],
+  "ownership": ["graphify"],
+  "hooks": {
+    "app.started": { "order": 10, "timeoutMs": 5000 },
+    "app.stopping": { "order": 10, "timeoutMs": 5000 },
+    "project.created": { "order": 10, "timeoutMs": 5000 },
+    "project.updated": { "order": 10, "timeoutMs": 5000 },
+    "project.archived": { "order": 10, "timeoutMs": 5000 },
+    "project.unarchived": { "order": 10, "timeoutMs": 5000 },
+    "project.deleted": { "order": 10, "timeoutMs": 5000 },
+    "project.metadata": { "order": 10, "timeoutMs": 5000 },
+    "task.completed": { "order": 10, "timeoutMs": 5000 }
+  },
+  "frontend": {
+    "scripts": [{ "path": "graphify.js" }]
+  },
+  "contributes": {
+    "projectFields": [
+      { "id": "enabled", "title": "Graphify", "slot": "project-form", "order": 10 }
+    ],
+    "projectBadges": [
+      { "id": "graphify-status", "title": "Graphify status", "slot": "project-header", "order": 10 }
+    ]
+  }
+}

@@ -351,6 +351,16 @@ function graphifyUiState(project) {
   return 'pending';
 }
 
+function compatibilityOwner(domain) {
+  const ownership = EXTENSION_SETTINGS && EXTENSION_SETTINGS.platform && EXTENSION_SETTINGS.platform.ownership;
+  const state = ownership && ownership[domain];
+  return state && state.activeOwner ? state.activeOwner : 'legacy';
+}
+
+function legacyOwnsUi(domain) {
+  return compatibilityOwner(domain) === 'legacy';
+}
+
 async function queueProjectGraphify(project) {
   if (!project || ['queued', 'running'].includes(project.graphify_status)) return;
   try {
@@ -389,20 +399,22 @@ function renderGraphifyPill(project, opts) {
 }
 
 function renderProjectHeaderBadges(project) {
-  const gitBadge = project && project.git_initialized
-    ? h('span', {
-        class: 'project-git-badge project-git-badge-lg',
-        title: 'Project Git repository\n' + (project.git_repo_root || project.path || ''),
-      }, 'Git')
-    : project && project.git_repo_kind === 'parent'
+  const gitBadge = legacyOwnsUi('git')
+    ? project && project.git_initialized
       ? h('span', {
-          class: 'project-git-badge project-git-badge-lg project-git-badge-warn',
-          title: project.git_warning || ('Parent Git repository: ' + project.git_parent_repo_root),
-        }, 'Parent Git')
-      : null;
+          class: 'project-git-badge project-git-badge-lg',
+          title: 'Project Git repository\n' + (project.git_repo_root || project.path || ''),
+        }, 'Git')
+      : project && project.git_repo_kind === 'parent'
+        ? h('span', {
+            class: 'project-git-badge project-git-badge-lg project-git-badge-warn',
+            title: project.git_warning || ('Parent Git repository: ' + project.git_parent_repo_root),
+          }, 'Parent Git')
+        : null
+    : null;
   return [
     gitBadge,
-    renderGraphifyPill(project, { action: true }),
+    legacyOwnsUi('graphify') ? renderGraphifyPill(project, { action: true }) : null,
     ...renderExtensionNodes('projectBadges', { project }, 'project-header'),
   ].filter(Boolean);
 }
@@ -461,6 +473,85 @@ function openExtensionModal(opts) {
   $('#extensionModalBody').replaceChildren(...extensionModalNodes(opts.body || opts.content));
   $('#extensionModalActions').replaceChildren(...extensionModalNodes(opts.actions));
   show('extensionModal');
+}
+
+function migrationOwnerLabel(target) {
+  if (!target) return 'Legacy';
+  if (target.activeOwner === 'legacy') return target.fallbackReason ? 'Legacy fallback' : 'Legacy';
+  return target.activeOwner || target.targetOwner || 'Legacy';
+}
+
+function migrationWelcomeBody(state) {
+  const rows = (state.targets || []).map((target) =>
+    h('div', { class: 'settings-kv-row' },
+      h('span', { class: 'settings-kv-label' }, target.domain === 'git' ? 'Git Workflow' : 'Graphify'),
+      h('span', {
+        class: 'settings-kv-value',
+        title: target.fallbackReason || '',
+      }, `${migrationOwnerLabel(target)} · ${target.affectedProjects || 0} projects`),
+    ),
+  );
+  const details = state.details || {};
+  return [
+    h('p', {}, state.body || ''),
+    h('div', { class: 'settings-kv-grid' }, rows),
+    h('details', { class: 'migration-details' },
+      h('summary', {}, 'Details'),
+      h('pre', {}, JSON.stringify({
+        variant: state.variant,
+        ledgerStatus: details.ledgerStatus,
+        ledgerError: details.ledgerError,
+        planCreatedAt: details.planCreatedAt,
+        targets: state.targets,
+      }, null, 2)),
+    ),
+  ];
+}
+
+async function completeMigrationWelcome(state) {
+  await api.send('POST', '/api/migration/welcome/complete', { version: state.version });
+  hide('extensionModal');
+}
+
+async function retryMigrationWelcome(state) {
+  try {
+    const result = await api.send('POST', '/api/migration/retry', {});
+    await loadExtensions({ quiet: true });
+    openMigrationWelcome(result.welcome || { ...state, variant: 'migrated', canRetry: false });
+  } catch (e) {
+    toast('Migration retry failed: ' + e.message, { err: true });
+  }
+}
+
+function openMigrationWelcome(state) {
+  const actions = [];
+  if (state.canRetry) {
+    actions.push(h('button', {
+      type: 'button',
+      class: 'btn',
+      onclick: () => retryMigrationWelcome(state),
+    }, state.secondaryAction || 'Retry migration'));
+  }
+  actions.push(h('button', {
+    type: 'button',
+    class: 'btn btn-primary',
+    onclick: () => completeMigrationWelcome(state).catch((e) => toast('Could not save: ' + e.message, { err: true })),
+  }, state.primaryAction || 'Continue'));
+  openExtensionModal({
+    title: state.title || 'Bundled integrations',
+    subtitle: state.variant || '',
+    body: migrationWelcomeBody(state),
+    actions,
+  });
+}
+
+async function loadMigrationWelcome(force) {
+  try {
+    const state = await api.get('/api/migration/welcome' + (force ? '?force=1' : ''));
+    if (force || state.show) openMigrationWelcome(state);
+  } catch {
+    /* welcome must never block startup */
+  }
 }
 
 function configureExtensionRuntimeHost() {
@@ -1910,6 +2001,7 @@ $('#checkUpdatesBtn').addEventListener('click', checkForUpdates);
 $('#dryRunUpdateBtn').addEventListener('click', () => runUpdateAction('dryRun'));
 $('#applyUpdateBtn').addEventListener('click', () => runUpdateAction('apply'));
 $('#rollbackUpdateBtn').addEventListener('click', () => runUpdateAction('rollback'));
+$('#migrationWelcomeBtn').addEventListener('click', () => loadMigrationWelcome(true));
 
 /* -------------------------------------------------------- sub-panel controls */
 
@@ -2978,7 +3070,13 @@ function openProjectModal(project) {
   $('#p_name').value = project ? project.name : '';
   $('#p_path').value = project ? project.path : '';
   $('#p_description').value = project ? project.description || '' : '';
+  const graphifyLegacyField = $('#projectGraphifyLegacyField');
+  const graphifyLegacy = legacyOwnsUi('graphify');
+  if (graphifyLegacyField) graphifyLegacyField.hidden = !graphifyLegacy;
   $('#p_graphify').checked = project ? project.graphify_enabled !== 0 : true;
+  const gitLegacyField = $('#projectGitLegacyField');
+  const gitLegacy = legacyOwnsUi('git');
+  if (gitLegacyField) gitLegacyField.hidden = !gitLegacy;
   $('#p_git').checked = project ? !!project.git_initialized : false;
   $('#p_git').disabled = project ? !!project.git_initialized : false;
   $('#p_git').closest('.checkbox').classList.toggle('disabled', $('#p_git').disabled);
@@ -3015,9 +3113,9 @@ $('#projectForm').addEventListener('submit', async (ev) => {
     name: $('#p_name').value.trim(),
     path: $('#p_path').value.trim(),
     description: $('#p_description').value,
-    graphify_enabled: $('#p_graphify').checked,
-    git_enabled: $('#p_git').checked,
   };
+  if (legacyOwnsUi('graphify')) body.graphify_enabled = $('#p_graphify').checked;
+  if (legacyOwnsUi('git')) body.git_enabled = $('#p_git').checked;
   if (!body.path) return toast('Project path is required', { err: true });
   try {
     const saved = id
@@ -3511,6 +3609,7 @@ async function init() {
   restoreLoadingStep('Workspace restored');
   persistUiState();
   setTimeout(hideRestoreLoading, 260);
+  setTimeout(() => loadMigrationWelcome(false), 420);
   loadModelConnections();
 }
 
