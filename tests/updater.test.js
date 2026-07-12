@@ -11,6 +11,15 @@ const Database = require('better-sqlite3');
 const updater = require('../lib/core/updater');
 
 const ROOT = path.resolve(__dirname, '..');
+const ORIGINAL_GRAPHIFY_BIN = process.env.CC_GRAPHIFY_BIN;
+
+// Migration readiness only requires a successful `--version` probe. Keep the
+// tests independent of whether Graphify happens to be installed on the host.
+process.env.CC_GRAPHIFY_BIN = process.execPath;
+test.after(() => {
+  if (ORIGINAL_GRAPHIFY_BIN === undefined) delete process.env.CC_GRAPHIFY_BIN;
+  else process.env.CC_GRAPHIFY_BIN = ORIGINAL_GRAPHIFY_BIN;
+});
 
 function hasGit() {
   return spawnSync('git', ['--version'], { encoding: 'utf8' }).status === 0;
