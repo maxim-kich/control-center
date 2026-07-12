@@ -2001,6 +2001,7 @@ $('#checkUpdatesBtn').addEventListener('click', checkForUpdates);
 $('#dryRunUpdateBtn').addEventListener('click', () => runUpdateAction('dryRun'));
 $('#applyUpdateBtn').addEventListener('click', () => runUpdateAction('apply'));
 $('#rollbackUpdateBtn').addEventListener('click', () => runUpdateAction('rollback'));
+$('#confirmUpdateBtn').addEventListener('click', confirmUpdateAction);
 $('#migrationWelcomeBtn').addEventListener('click', () => loadMigrationWelcome(true));
 
 /* -------------------------------------------------------- sub-panel controls */
@@ -2290,6 +2291,40 @@ async function checkForUpdates() {
 
 async function runUpdateAction(kind) {
   if (updateActionSaving || restartingServer || quittingServer) return;
+  if (kind === 'apply' || kind === 'rollback') {
+    openUpdateConfirmModal(kind);
+    return;
+  }
+  await executeUpdateAction(kind);
+}
+
+let pendingUpdateAction = null;
+
+function openUpdateConfirmModal(kind) {
+  const version = GENERAL_SETTINGS.version || {};
+  const rollback = kind === 'rollback';
+  pendingUpdateAction = kind;
+  $('#updateConfirmEyebrow').textContent = rollback ? 'Restore previous version' : 'New version available';
+  $('#updateConfirmTitle').textContent = rollback ? 'Rollback Control Center?' : 'Update Control Center?';
+  $('#updateConfirmDescription').textContent = rollback
+    ? 'Control Center will restore the previous version and restart the local server. Your projects and runtime data will stay in place.'
+    : 'Control Center will install the latest version and restart the local server. Your projects and runtime data will stay in place.';
+  $('#updateCurrentVersion').textContent = version.version || 'Current';
+  $('#updateLatestVersion').textContent = rollback ? (version.rollbackRef || 'Previous') : (version.latestReleaseVersion || 'Latest');
+  $('#confirmUpdateBtn').textContent = rollback ? 'Rollback and restart' : 'Update and restart';
+  show('updateConfirmModal');
+  $('#confirmUpdateBtn').focus();
+}
+
+async function confirmUpdateAction() {
+  const kind = pendingUpdateAction;
+  if (!kind) return;
+  pendingUpdateAction = null;
+  hide('updateConfirmModal');
+  await executeUpdateAction(kind);
+}
+
+async function executeUpdateAction(kind) {
   const endpoints = {
     dryRun: '/api/update/dry-run',
     apply: '/api/update/apply',
@@ -2300,8 +2335,6 @@ async function runUpdateAction(kind) {
     apply: 'Update',
     rollback: 'Rollback',
   };
-  if (kind === 'apply' && !confirm('Update Control Center and restart the local server?')) return;
-  if (kind === 'rollback' && !confirm('Rollback Control Center and restart the local server?')) return;
   updateActionSaving = labels[kind] + ' running...';
   renderVersionSettings();
   try {

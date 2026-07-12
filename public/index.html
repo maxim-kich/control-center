@@ -271,6 +271,34 @@
     </main>
   </section>
 
+  <div class="modal-overlay" id="updateConfirmModal" hidden>
+    <div class="modal modal-sm update-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="updateConfirmTitle" aria-describedby="updateConfirmDescription">
+      <header class="modal-head update-confirm-head">
+        <div class="modal-head-main">
+          <div class="update-confirm-eyebrow" id="updateConfirmEyebrow">New version available</div>
+          <h3 id="updateConfirmTitle">Update Control Center?</h3>
+        </div>
+        <button class="icon-btn" data-close="updateConfirmModal" type="button" aria-label="Close update confirmation">✕</button>
+      </header>
+      <div class="update-confirm-body">
+        <div class="update-version-flow" id="updateVersionFlow">
+          <span class="update-version-pill" id="updateCurrentVersion">Current</span>
+          <span class="update-version-arrow" aria-hidden="true">→</span>
+          <span class="update-version-pill latest" id="updateLatestVersion">Latest</span>
+        </div>
+        <p id="updateConfirmDescription">Control Center will install the latest version and restart the local server. Your projects and runtime data will stay in place.</p>
+        <div class="update-confirm-note">
+          <span class="update-confirm-note-icon" aria-hidden="true">↻</span>
+          <span>The app will reconnect automatically after the restart.</span>
+        </div>
+      </div>
+      <footer class="update-confirm-actions">
+        <button class="btn" id="cancelUpdateConfirmBtn" data-close="updateConfirmModal" type="button">Cancel</button>
+        <button class="btn btn-primary" id="confirmUpdateBtn" type="button">Update and restart</button>
+      </footer>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="extensionInstallModal" hidden>
     <div class="modal modal-sm">
       <header class="modal-head">
