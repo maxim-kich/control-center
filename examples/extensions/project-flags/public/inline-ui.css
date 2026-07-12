@@ -1,0 +1,33 @@
+.project-flags-pill {
+  color: var(--blue);
+  border-color: rgba(68, 147, 248, 0.55);
+  background: rgba(68, 147, 248, 0.08);
+}
+
+.project-flags-field {
+  margin-top: -2px;
+}
+
+.project-flags-task-badge {
+  color: var(--blue);
+  border-color: rgba(68, 147, 248, 0.42);
+  background: rgba(68, 147, 248, 0.08);
+}
+
+.project-flags-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.project-flags-modal p {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.project-flags-modal code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -170,7 +170,6 @@ let tabsRestored = false; // one-shot guard: re-open live terminals on the first
 let uiStateRestoring = false;
 const UI_STATE_KEY = 'dashboard.uiState'; // sessionStorage { bootId, state }
 const OPEN_TABS_KEY = 'dashboard.openTabs'; // localStorage { bootId, ids, activeId } for live terminal tabs
-const OLD_OPEN_TABS_KEY = 'planora.openTabs';
 const BOARD_RENDER_SETTLE_MS = 180;
 const TERMINAL_WRITE_CHUNK = 64 * 1024;
 let pendingBoardRender = false;
@@ -180,18 +179,6 @@ let deferBoardRenderUntil = 0;
 let mouseButtonDown = false;
 const activePointers = new Set();
 const cardCaches = new Map();
-
-function migrateStorageKey(oldKey, newKey) {
-  try {
-    if (localStorage.getItem(newKey) == null && localStorage.getItem(oldKey) != null) {
-      localStorage.setItem(newKey, localStorage.getItem(oldKey));
-      localStorage.removeItem(oldKey);
-    }
-  } catch {
-    /* storage unavailable — best-effort */
-  }
-}
-migrateStorageKey(OLD_OPEN_TABS_KEY, OPEN_TABS_KEY);
 
 function safeJsonParse(raw) {
   if (!raw) return null;
@@ -3379,8 +3366,6 @@ $('#quitServerBtn').addEventListener('click', quitServer);
 // Dashboard is served from localhost / 127.0.0.1, which Chrome treats as a secure context, so the
 // Notification API is available here without HTTPS.
 const NOTIFY_KEY = 'dashboard.notify';
-const OLD_NOTIFY_KEY = 'planora.notify';
-migrateStorageKey(OLD_NOTIFY_KEY, NOTIFY_KEY);
 const NOTIFY_STATES = {
   needs_attention: { verb: 'Needs attention', sticky: true },
   done: { verb: 'Done', blurb: 'task complete', sticky: false },

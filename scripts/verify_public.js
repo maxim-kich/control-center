@@ -6,6 +6,10 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
+const FORBIDDEN_BRANDS = [
+  ['compe', 'titionline'].join(''),
+  ['plan', 'ora'].join(''),
+];
 
 function gitFiles(args) {
   return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' })
@@ -52,6 +56,7 @@ const textFiles = tracked.filter((file) => {
 });
 
 const personalMatches = [];
+const brandMatches = [];
 
 const personalPatterns = [
   {
@@ -98,7 +103,31 @@ function scanPersonalPaths(files, label) {
   }
 }
 
+function scanForbiddenBrands(files, label) {
+  for (const file of files) {
+    const full = path.join(ROOT, file);
+    let text;
+    try {
+      const stat = fs.statSync(full);
+      if (!stat.isFile() || stat.size > 5 * 1024 * 1024) continue;
+      const buf = fs.readFileSync(full);
+      if (buf.includes(0)) continue;
+      text = buf.toString('utf8');
+    } catch {
+      continue;
+    }
+    const lines = text.split(/\r?\n/);
+    lines.forEach((line, index) => {
+      const normalized = line.toLowerCase();
+      if (FORBIDDEN_BRANDS.some((brand) => normalized.includes(brand))) {
+        brandMatches.push(`${label}:${file}:${index + 1}`);
+      }
+    });
+  }
+}
+
 scanPersonalPaths(textFiles, 'tracked');
+scanForbiddenBrands(textFiles, 'tracked');
 
 let packageForbidden = [];
 let packageFiles = [];
@@ -112,13 +141,14 @@ try {
   packageFiles = ((pack[0] && pack[0].files) || []).map((item) => item.path).filter(Boolean);
   packageForbidden = packageFiles.filter(matchesForbidden);
   scanPersonalPaths(packageFiles.filter((file) => !matchesForbidden(file)), 'package');
+  scanForbiddenBrands(packageFiles.filter((file) => !matchesForbidden(file)), 'package');
 } catch (e) {
   console.error('Could not inspect npm package contents:');
   console.error(e && e.stderr ? String(e.stderr).trim() : e.message);
   process.exit(1);
 }
 
-if (generatedTracked.length || personalMatches.length || packageForbidden.length) {
+if (generatedTracked.length || personalMatches.length || brandMatches.length || packageForbidden.length) {
   if (generatedTracked.length) {
     console.error('Tracked generated/private files:');
     for (const file of generatedTracked) console.error(`  ${file}`);
@@ -130,6 +160,10 @@ if (generatedTracked.length || personalMatches.length || packageForbidden.length
   if (personalMatches.length) {
     console.error('Private-looking content found:');
     for (const match of personalMatches) console.error(`  ${match}`);
+  }
+  if (brandMatches.length) {
+    console.error('Forbidden brand references found:');
+    for (const match of brandMatches) console.error(`  ${match}`);
   }
   process.exit(1);
 }

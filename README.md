@@ -141,7 +141,7 @@ Rich UI extensions should use `extension.json` with explicit permissions:
 
 ```json
 {
-  "id": "project-flags",
+  "id": "sample-extension",
   "permissions": ["ui:frontend", "ui:project-fields", "ui:project-actions", "api:extension-state"],
   "frontend": {
     "scripts": [{ "path": "inline-ui.js" }],
@@ -149,12 +149,14 @@ Rich UI extensions should use `extension.json` with explicit permissions:
   },
   "contributes": {
     "projectFields": [{ "id": "important-project", "title": "Important project" }],
-    "projectActions": [{ "id": "open-project-note", "title": "Open note" }]
+    "projectActions": [{ "id": "view-details", "title": "View details" }]
   }
 }
 ```
 
-Extension scripts register handlers through `window.ControlCenterExtensions.register(<id>, handlers)`. Extension-owned state is stored through `/api/extensions/<extension-id>/state` and is scoped by extension id, scope type, scope id, and key, so plugins do not need core project columns. Copyable samples are in `examples/extensions/status-panel` and `examples/extensions/project-flags`.
+Extension scripts register handlers through `window.ControlCenterExtensions.register(<id>, handlers)`. Extension-owned state is stored through `/api/extensions/<extension-id>/state` and is scoped by extension id, scope type, scope id, and key, so extensions do not need core project columns. Extension examples are maintained in the source repository and are not included in release packages.
+
+The [extension development guide](docs/extensions/development.md) documents manifests, routes, frontend assets, UI contributions, storage, hooks, migrations, conflicts, update boundaries, and tests.
 
 Backend extensions can declare provider-neutral lifecycle hooks with the `hooks:lifecycle` permission:
 
@@ -175,15 +177,13 @@ Hooks run serially by ascending `order`, then extension ID. The default timeout 
 
 Backend extension code is trusted code loaded in the Control Center Node.js process. Install only extensions whose source you trust. Lifecycle handlers receive scoped capabilities, but frontend assets and optional route modules are not sandboxed.
 
-`examples/extensions/task-journal` is the lifecycle reference. It records task status changes and completed tasks from both Codex and Claude Code, enriches project metadata, provides journal checkpoints, and can suppress automatic task commits when manual checkpoints are enabled.
-
 Install extensions from `Settings -> Extensions -> Install extension` by choosing an extension folder or entering a GitHub/Git URL. GitHub tree URLs can point at a subfolder, and the installer copies the detected extension into `~/.control-center/extensions/<extension-id>/`. Frontend-only extensions become available after the install refresh; extensions with `server.js` may need a restart before their local API routes are active.
 
 First-party optional extensions can also ship inside the application image under `bundled-extensions/`. Control Center catalogs those folders without network access, copies a selected bundle into the instance-owned extensions directory, keeps it disabled until explicitly enabled, compares semantic versions for upgrades, and retains the immediately previous bundle for file rollback. Enablement, installed versions, applied migration IDs, and rollback metadata persist in the instance database. SQL migrations run transactionally and require `migrations:run`; rolling back extension files does not reverse an already-applied data migration.
 
 Managed backend permissions are `git:read`, `git:write`, `process:managed`, `providers:setup`, `health:checks`, and `migrations:run`. Side-effecting managed calls additionally require an `ownership:<domain>` permission and a matching `ownership` declaration; ownership extensions must include a backend and health-check permission. The compatibility domains in this release are `graphify` and `git`. Each domain has one persisted preferred owner and one active owner; `legacy` is the default and automatic fallback when the preferred extension is disabled, missing, invalid, duplicated, or unhealthy. The legacy Graphify and Git paths check this active owner before every side effect, so core and an extension cannot both write the same domain. The catalog, permission decisions, ownership/fallback state, health results, and managed process status are visible at `/api/extensions/diagnostics` and in `/api/health`.
 
-This release ships first-party bundled `graphify` and `git-workflow` extensions. The updater performs a read-only usage inspection, persists a migration plan, backs up the database/configuration, installs the bundles offline, imports compatibility state into `extension_state`, validates health, then switches ownership only for domains with prior usage. Failed migration attempts record a ledger and leave the legacy owner active. The post-update introduction screen is keyed by app version and can be reopened from Settings -> General -> Version -> Integration notes.
+This release package includes only the first-party bundled `graphify` and `git-workflow` extensions. Development examples and other extensions are not shipped in the build. The updater performs a read-only usage inspection, persists a migration plan, backs up the database/configuration, installs the bundles offline, imports compatibility state into `extension_state`, validates health, then switches ownership only for domains with prior usage. Failed migration attempts record a ledger and leave the legacy owner active. The post-update introduction screen is keyed by app version and can be reopened from Settings -> General -> Version -> Integration notes.
 
 The legacy Graphify and Git implementations are intentionally retained for one release as fallback owners. They should be removed only after a later release has telemetry or support evidence that migration, rollback, and re-update are stable, compatibility API consumers have moved off legacy-only assumptions, and the release notes have announced the removal boundary.
 

@@ -1,6 +1,6 @@
 {
   "name": "control-center",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "description": "Local Control Center for managing AI coding tasks and launching interactive provider CLIs.",
   "license": "MIT",
@@ -16,6 +16,19 @@
   "engines": {
     "node": ">=18"
   },
+  "files": [
+    ".codex-dashboard/hooks/task_event.js",
+    "bin/",
+    "bundled-extensions/git-workflow/",
+    "bundled-extensions/graphify/",
+    "control-center.manifest.json",
+    "docs/",
+    "lib/",
+    "public/",
+    "scripts/",
+    "server.js",
+    "start.command"
+  ],
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
     "start": "node server.js",

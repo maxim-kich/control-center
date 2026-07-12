@@ -1,0 +1,40 @@
+{
+  "id": "project-flags",
+  "name": "Project Flags",
+  "version": "0.1.0",
+  "description": "Example frontend extension with a per-project flag, badges, an action, and a modal.",
+  "permissions": [
+    "ui:frontend",
+    "ui:project-fields",
+    "ui:project-actions",
+    "ui:project-badges",
+    "ui:task-badges",
+    "ui:modals",
+    "api:extension-state"
+  ],
+  "frontend": {
+    "scripts": [
+      { "path": "inline-ui.js" }
+    ],
+    "styles": [
+      { "path": "inline-ui.css" }
+    ]
+  },
+  "contributes": {
+    "projectFields": [
+      { "id": "important-project", "title": "Important project", "slot": "project-form" }
+    ],
+    "projectActions": [
+      { "id": "open-project-note", "title": "Open note", "slot": "project-header" }
+    ],
+    "projectBadges": [
+      { "id": "important-badge", "title": "Important", "slot": "project-header" }
+    ],
+    "taskBadges": [
+      { "id": "project-flag", "title": "Project flag", "slot": "task-card" }
+    ],
+    "modals": [
+      { "id": "project-note", "title": "Project note", "slot": "modal" }
+    ]
+  }
+}
