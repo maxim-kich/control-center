@@ -1,0 +1,40 @@
+{
+  "apiVersion": 1,
+  "id": "task-journal",
+  "name": "Task Journal",
+  "version": "0.1.0",
+  "description": "Tracks completed tasks per project and supports manual journal checkpoints.",
+  "permissions": [
+    "hooks:lifecycle",
+    "api:extension-state",
+    "ui:frontend",
+    "ui:project-fields",
+    "ui:project-actions",
+    "ui:project-badges",
+    "ui:modals"
+  ],
+  "hooks": {
+    "task.statusChanged": { "order": 100, "timeoutMs": 2000 },
+    "task.completed": { "order": 100, "timeoutMs": 2000 },
+    "project.metadata": { "order": 100, "timeoutMs": 2000 },
+    "git.autoCommitPolicy": { "order": 100, "timeoutMs": 2000 }
+  },
+  "frontend": {
+    "scripts": [{ "path": "task-journal.js" }],
+    "styles": [{ "path": "task-journal.css" }]
+  },
+  "contributes": {
+    "projectFields": [
+      { "id": "manual-checkpoints", "title": "Manual journal checkpoints", "slot": "project-form" }
+    ],
+    "projectActions": [
+      { "id": "open-journal", "title": "Open journal", "slot": "project-header", "order": 100 }
+    ],
+    "projectBadges": [
+      { "id": "pending-journal", "title": "Journal entries", "slot": "project-header", "order": 100 }
+    ],
+    "modals": [
+      { "id": "journal", "title": "Task Journal", "slot": "modal" }
+    ]
+  }
+}

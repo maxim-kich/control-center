@@ -1,0 +1,27 @@
+.task-journal-pill {
+  color: var(--green);
+  border-color: rgba(54, 179, 126, 0.48);
+  background: rgba(54, 179, 126, 0.09);
+}
+
+.task-journal-field {
+  margin-top: 2px;
+}
+
+.task-journal-modal,
+.task-journal-list {
+  display: grid;
+  gap: 10px;
+}
+
+.task-journal-entry {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.task-journal-entry span {
+  color: var(--muted);
+  font-size: 12px;
+}
