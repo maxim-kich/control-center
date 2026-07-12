@@ -199,7 +199,7 @@ npm run verify:release
 
 `npm run verify:public` fails if generated/private files, planning notes, known private screenshots, or non-example absolute home paths are tracked or included in the package.
 
-`npm run verify:release` runs the full test suite, public verification, and an isolated bundled-migration dry-run fixture. In a clean release checkout with update targets configured, set `CC_RELEASE_GATE_UPDATE_SMOKE=1` and `CC_RELEASE_GATE_ROLLBACK_SMOKE=1` to include real updater and rollback dry-run smoke checks.
+`npm run verify:release` is the mandatory publication command. It runs the full test suite, public verification, bundled-migration dry-run fixture, and the isolated previous-version update/startup migration/rollback/re-update smoke. A failure in any smoke phase blocks release. Set `CC_SMOKE_KEEP=1` to retain the isolated fixture for diagnosis. In a clean release checkout with update targets configured, `CC_RELEASE_GATE_UPDATE_SMOKE=1` and `CC_RELEASE_GATE_ROLLBACK_SMOKE=1` additionally exercise the environment's configured updater targets.
 
 `npm run smoke:release` builds a temporary release remote from `v0.1.0` and the current working tree, creates a previous-schema `CONTROL_CENTER_HOME`, and drives the real updater through update, startup migration, rollback, legacy restart, and re-update. It never updates the development checkout. Set `CC_SMOKE_PREVIOUS_REF` to test another previous release or `CC_SMOKE_KEEP=1` to retain the isolated fixture for debugging.
 

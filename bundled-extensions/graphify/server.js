@@ -1,5 +1,7 @@
 'use strict';
 
+const { spawnSync } = require('child_process');
+
 let runtime = null;
 
 const GRAPHIFY_KEYS = [
@@ -139,10 +141,24 @@ exports.register = ({ express, db, paths, extension, capabilities }) => {
     manager: null,
   };
 
-  capabilities.health.register('runtime', () => ({
-    ok: true,
-    detail: runtime.manager && !runtime.manager.shuttingDown ? 'running' : 'idle',
-  }));
+  capabilities.health.register('readiness', () => {
+    if (!capabilities.processes || !capabilities.providers || !capabilities.ownership) {
+      return { ok: false, detail: 'required Graphify capabilities are not wired' };
+    }
+    const manager = new runtime.GraphifyManager(runtime.db, {
+      runProcess: runProcess(capabilities),
+      providerSetup: setupProvider(capabilities),
+      providerCleanup: cleanupProvider(capabilities),
+      watch: false,
+      bootstrap: false,
+    });
+    const probe = spawnSync(manager.bin, ['--version'], { encoding: 'utf8', timeout: 5000 });
+    manager.shutdown();
+    if (probe.error || probe.status !== 0) {
+      return { ok: false, detail: `Graphify CLI is unavailable: ${(probe.error && probe.error.message) || probe.stderr || `exit ${probe.status}`}` };
+    }
+    return { ok: true, detail: 'capabilities, manager, providers, and CLI are ready' };
+  });
 
   const router = express.Router();
 

@@ -356,3 +356,59 @@ test('bundled integration migration records failure ledger and falls back to leg
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('completed migration is a no-op unless repair restores missing disabled outdated corrupt and unhealthy bundles', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-bundled-repair-'));
+  const { dbPath } = makeBundledMigrationDb(tmp);
+  const extensionsDir = path.join(tmp, 'extensions');
+  const options = { root: ROOT, appHome: tmp, dbPath, extensionsDir };
+  try {
+    const first = await updater.runBundledIntegrationMigration(options);
+    assert.equal(first.ok, true);
+    const noOp = await updater.runBundledIntegrationMigration(options);
+    assert.equal(noOp.alreadyCompleted, true);
+
+    fs.rmSync(path.join(extensionsDir, 'graphify'), { recursive: true, force: true });
+    let repaired = await updater.runBundledIntegrationMigration({ ...options, repair: true });
+    assert.equal(repaired.diagnostics.ownership.graphify.activeOwner, 'graphify');
+    assert.equal(fs.existsSync(path.join(extensionsDir, 'graphify', 'extension.json')), true);
+
+    const db = new Database(dbPath);
+    const registryKey = 'extensions.platform.registry.v1';
+    const row = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(registryKey);
+    const registry = JSON.parse(row.value);
+    registry.extensions.graphify.enabled = false;
+    registry.extensions.graphify.unhealthyOwnership = { graphify: 'seeded readiness failure' };
+    db.prepare('UPDATE app_meta SET value = ? WHERE key = ?').run(JSON.stringify(registry), registryKey);
+    db.close();
+    const manifestPath = path.join(extensionsDir, 'git-workflow', 'extension.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.version = '0.0.1';
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    fs.writeFileSync(path.join(extensionsDir, 'graphify', 'extension.json'), '{corrupt');
+
+    repaired = await updater.runBundledIntegrationMigration({ ...options, repair: true });
+    assert.equal(repaired.diagnostics.ownership.graphify.activeOwner, 'graphify');
+    assert.equal(repaired.diagnostics.ownership.git.activeOwner, 'git-workflow');
+    assert.equal(repaired.diagnostics.catalog.find((item) => item.id === 'graphify').enabled, true);
+    assert.equal(repaired.diagnostics.catalog.find((item) => item.id === 'git-workflow').installedVersion, '0.1.0');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('startup provenance preserves genuine first-install classification after schema creation', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-first-install-'));
+  const dbPath = path.join(tmp, 'tasks.db');
+  const db = new Database(dbPath);
+  db.exec('CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT NOT NULL)');
+  db.close();
+  try {
+    const fresh = updater.createBundledIntegrationMigrationPlan({ dbPath, installationProvenance: { dbExisted: false } });
+    const existing = updater.createBundledIntegrationMigrationPlan({ dbPath, installationProvenance: { dbExisted: true } });
+    assert.equal(fresh.newUser, true);
+    assert.equal(existing.newUser, false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

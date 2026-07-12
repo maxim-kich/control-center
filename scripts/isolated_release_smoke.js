@@ -155,6 +155,10 @@ async function withServer(install, home, dbPath, verify) {
   const port = probe.address().port;
   await new Promise((resolve) => probe.close(resolve));
   const output = [];
+  const graphifyProbe = path.join(home, 'bin', 'graphify-smoke');
+  fs.mkdirSync(path.dirname(graphifyProbe), { recursive: true });
+  fs.writeFileSync(graphifyProbe, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo graphify-smoke-1.0; fi\nexit 0\n');
+  fs.chmodSync(graphifyProbe, 0o755);
   const child = spawn(process.execPath, ['server.js'], {
     cwd: install,
     env: {
@@ -163,7 +167,7 @@ async function withServer(install, home, dbPath, verify) {
       CC_DB_PATH: dbPath,
       CC_WORKSPACE_ROOT: path.dirname(home),
       PORT: String(port),
-      CC_GRAPHIFY_BIN: path.join(home, 'missing-graphify-cli'),
+      CC_GRAPHIFY_BIN: graphifyProbe,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

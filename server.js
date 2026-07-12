@@ -21,6 +21,13 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const paths = require('./lib/core/paths');
+// Capture provenance before lib/db creates and initializes the database. Without
+// this, a genuine first launch is indistinguishable from an existing empty install.
+const STARTUP_DB_PATH = process.env.CC_DB_PATH || path.join(paths.DATA_DIR, 'tasks.db');
+const STARTUP_INSTALLATION_PROVENANCE = {
+  dbExisted: fs.existsSync(STARTUP_DB_PATH),
+  capturedAt: new Date().toISOString(),
+};
 const db = require('./lib/db');
 const codex = require('./lib/codex');
 const { GraphifyManager, graphifyProjectInfo } = require('./lib/graphify');
@@ -426,6 +433,7 @@ app.post('/api/migration/retry', async (req, res) => {
       dbPath: db.DB_PATH,
       backupDir: paths.BACKUP_DIR,
       extensionsDir: paths.EXTENSIONS_DIR,
+      repair: true,
     });
     extensionPlatform.reloadState();
     refreshExtensionManager();
@@ -542,6 +550,7 @@ app.post('/api/extensions/install-folder', extensionUploadJsonParser, (req, res)
   try {
     const installed = installExtensionUpload(req.body || {}, {
       extensionsDir: paths.EXTENSIONS_DIR,
+      installationProvenance: STARTUP_INSTALLATION_PROVENANCE,
       overwrite: !!(req.body && req.body.overwrite),
     });
     res.status(201).json(extensionInstallPayload(installed));
@@ -1756,6 +1765,7 @@ async function bootstrapBundledIntegrations() {
       dbPath: db.DB_PATH,
       backupDir: paths.BACKUP_DIR,
       extensionsDir: paths.EXTENSIONS_DIR,
+      installationProvenance: STARTUP_INSTALLATION_PROVENANCE,
     });
     if (!result.alreadyCompleted) {
       extensionPlatform.reloadState();

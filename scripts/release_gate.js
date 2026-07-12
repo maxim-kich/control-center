@@ -78,6 +78,7 @@ async function main() {
   run('npm test', 'npm', ['test']);
   run('public verification', 'npm', ['run', 'verify:public']);
   await migrationDryRunGate();
+  run('isolated update, startup migration, rollback, and re-update smoke', process.execPath, ['scripts/isolated_release_smoke.js']);
 
   if (process.env.CC_RELEASE_GATE_UPDATE_SMOKE === '1') {
     run('real updater dry-run smoke', process.execPath, ['scripts/update.js', 'update', '--dry-run']);

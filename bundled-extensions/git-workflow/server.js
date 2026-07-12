@@ -1,5 +1,7 @@
 'use strict';
 
+const { spawnSync } = require('child_process');
+
 let runtime = null;
 
 function active(api) {
@@ -43,7 +45,14 @@ exports.register = ({ express, db, paths, extension, capabilities }) => {
     projectGitApiFields: gitRoots.projectGitApiFields,
   };
 
-  capabilities.health.register('runtime', () => ({ ok: true, detail: 'ready' }));
+  capabilities.health.register('readiness', () => {
+    if (!capabilities.git || !capabilities.ownership) return { ok: false, detail: 'required Git capabilities are not wired' };
+    const probe = spawnSync('git', ['--version'], { encoding: 'utf8', timeout: 5000 });
+    if (probe.error || probe.status !== 0) {
+      return { ok: false, detail: `Git CLI is unavailable: ${(probe.error && probe.error.message) || probe.stderr || `exit ${probe.status}`}` };
+    }
+    return { ok: true, detail: 'read-only Git inspection and ownership enforcement are ready' };
+  });
 
   const router = express.Router();
   router.get('/projects/:id/status', (req, res) => {
