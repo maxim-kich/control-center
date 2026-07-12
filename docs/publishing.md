@@ -33,8 +33,9 @@ Before tagging a release:
 To publish:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag -a vX.Y.Z -m "Control Center vX.Y.Z"
+git push github main
+git push github vX.Y.Z
 ```
 
 The tag workflow runs `npm ci`, `npm run verify:release`, builds `control-center-<version>.tgz`, and attaches it to the GitHub Release with generated notes.

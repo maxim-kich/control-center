@@ -107,7 +107,7 @@ export CC_UPDATE_REPO=maxim-kich/control-center
 ~/.control-center/bin/control-center check-updates
 ```
 
-Settings -> General can check for updates, run an update dry-run, apply an update, and rollback when a rollback ref exists. Before replacing app code, the updater refuses dirty image-owned files, refuses extension conflicts by default, backs up config and the SQLite database, and runs migrations against a copied database:
+Settings -> General can check for updates, run an update dry-run, apply an update, and rollback when a rollback ref exists. Before switching releases, the updater replaces image-owned application files, preserves user-owned extensions and instance state, refuses extension conflicts by default, backs up config and the SQLite database, and runs migrations against a copied database:
 
 ```bash
 ~/.control-center/bin/control-center update --dry-run
@@ -118,7 +118,7 @@ Settings -> General can check for updates, run an update dry-run, apply an updat
 Development checkouts can pass a specific Git ref:
 
 ```bash
-~/.control-center/bin/control-center update --target v0.1.1 --dry-run
+~/.control-center/bin/control-center update --target v0.1.2 --dry-run
 ```
 
 Tagged pushes matching `v*` run the GitHub release workflow and attach the package artifact to the release after `npm run verify:release` passes.

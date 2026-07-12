@@ -67,6 +67,36 @@ test('imageOwnedChanges reports source changes and ignores generated files', { s
   assert.deepEqual(paths, ['docs/publishing.md', 'server.js']);
 });
 
+test('overwriteImageOwnedChanges replaces image-owned files and preserves generated and unknown files', { skip: !hasGit() }, (t) => {
+  const repo = makeRepo(t);
+  fs.writeFileSync(path.join(repo, 'server.js'), "console.log('changed');\n");
+  fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'docs', 'local.md'), '# local image file\n');
+  fs.mkdirSync(path.join(repo, 'data'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'data', 'tasks.db'), 'private');
+  fs.writeFileSync(path.join(repo, 'notes.txt'), 'unknown user file');
+
+  const result = updater.overwriteImageOwnedChanges(repo);
+
+  assert.equal(result.ok, false);
+  assert.equal(fs.readFileSync(path.join(repo, 'server.js'), 'utf8'), "console.log('server');\n");
+  assert.equal(fs.existsSync(path.join(repo, 'docs', 'local.md')), false);
+  assert.equal(fs.readFileSync(path.join(repo, 'data', 'tasks.db'), 'utf8'), 'private');
+  assert.equal(fs.readFileSync(path.join(repo, 'notes.txt'), 'utf8'), 'unknown user file');
+  assert.equal(updater.imageOwnedChanges(repo).ok, true);
+});
+
+test('overwriteImageOwnedChanges dry run reports changes without modifying files', { skip: !hasGit() }, (t) => {
+  const repo = makeRepo(t);
+  fs.writeFileSync(path.join(repo, 'server.js'), "console.log('changed');\n");
+
+  const result = updater.overwriteImageOwnedChanges(repo, { dryRun: true });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.changes.map((change) => change.path), ['server.js']);
+  assert.equal(fs.readFileSync(path.join(repo, 'server.js'), 'utf8'), "console.log('changed');\n");
+});
+
 test('backupInstance copies config and checkpointed database', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-updater-backup-'));
   const home = path.join(tmp, 'home');
