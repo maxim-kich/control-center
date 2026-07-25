@@ -43,6 +43,7 @@ const skills = require('./lib/skills');
 const { discoverModelProviders, normalizeActiveProvider } = require('./lib/modelProviders');
 const { getProvider } = require('./lib/providers');
 const { SessionManager } = require('./lib/sessionRunner');
+const { MacroPadBridge } = require('./lib/macropadBridge');
 
 // Self-heal node-pty's spawn-helper +x bit (survives `npm install --ignore-scripts`).
 ensureSpawnHelper();
@@ -72,6 +73,7 @@ const CAFFEINATE_ARGS = ['-dims', '-w', String(process.pid)];
 
 const manager = new SessionManager();
 manager.configure({ hookArgs, dbPath: db.DB_PATH, yolo: YOLO });
+const macroPadBridge = new MacroPadBridge({ manager, getTask: (taskId) => db.getTask(taskId) });
 
 const extensionPlatform = new ExtensionPlatform({
   db,
@@ -1204,6 +1206,28 @@ app.delete('/api/projects/:id/graphify', async (req, res) => {
 
 app.get('/api/tasks', (req, res) => {
   res.json(withChildren(db.listTasks()));
+});
+
+app.post('/api/integrations/macropad/focus', (req, res) => {
+  const body = req.body || {};
+  const taskId = typeof body.taskId === 'string' ? body.taskId : '';
+  const active = body.active === true;
+  const session = macroPadBridge.setFocus(taskId, active);
+  if (active && !session) return res.status(409).json({ error: 'terminal session is not live' });
+  res.json({ active: !!session, session });
+});
+
+app.get('/api/integrations/macropad/session', (req, res) => {
+  const session = macroPadBridge.currentSession();
+  if (!session) return res.status(404).json({ error: 'no focused terminal session' });
+  res.json(session);
+});
+
+app.post('/api/integrations/macropad/input', (req, res) => {
+  const taskId = req.body && req.body.taskId;
+  const data = req.body && req.body.data;
+  if (!macroPadBridge.write(taskId, data)) return res.status(409).json({ error: 'focused terminal session changed, is unavailable, or input is invalid' });
+  res.json({ accepted: true });
 });
 
 const FALLBACK_MODES = ['build', 'plan'];

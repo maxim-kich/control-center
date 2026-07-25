@@ -172,6 +172,7 @@ const UI_STATE_KEY = 'dashboard.uiState'; // sessionStorage { bootId, state }
 const OPEN_TABS_KEY = 'dashboard.openTabs'; // localStorage { bootId, ids, activeId } for live terminal tabs
 const BOARD_RENDER_SETTLE_MS = 180;
 const TERMINAL_WRITE_CHUNK = 64 * 1024;
+const MACROPAD_FOCUS_HEARTBEAT_MS = 2000;
 let pendingBoardRender = false;
 let pendingProjectFilterSync = false;
 let boardRenderTimer = null;
@@ -1527,7 +1528,10 @@ const tabs = {
     tab.exited = false;
     const ws = new WebSocket(`ws://${location.host}/pty?taskId=${encodeURIComponent(task.id)}`);
     tab.ws = ws;
-    ws.onopen = () => this.fit(tab);
+    ws.onopen = () => {
+      this.fit(tab);
+      publishMacroPadTerminalFocus();
+    };
     ws.onmessage = (ev) => {
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
@@ -1551,6 +1555,7 @@ const tabs = {
     ws.onclose = () => {
       if (tab.ws !== ws) return;
       tab.exited = true;
+      publishMacroPadTerminalFocus();
       tabs.sync();
     };
   },
@@ -1573,6 +1578,7 @@ const tabs = {
     });
     this.highlightCard();
     this.persist();
+    publishMacroPadTerminalFocus();
   },
 
   remove(taskId, { stop } = {}) {
@@ -1595,6 +1601,7 @@ const tabs = {
       }
     }
     this.persist();
+    publishMacroPadTerminalFocus();
     refresh(true);
   },
 
@@ -1656,6 +1663,43 @@ const tabs = {
   },
 };
 
+function macroPadTerminalIsFocused() {
+  const tab = tabs.map.get(tabs.activeId);
+  const drawer = $('#drawer');
+  return Boolean(
+    tab
+    && !tab.exited
+    && tab.ws
+    && tab.ws.readyState === WebSocket.OPEN
+    && drawer
+    && !drawer.hidden
+    && !drawer.classList.contains('collapsed')
+    && document.visibilityState === 'visible'
+    && document.hasFocus()
+  );
+}
+
+function publishMacroPadTerminalFocus(opts) {
+  opts = opts || {};
+  const taskId = tabs.activeId;
+  const active = typeof opts.active === 'boolean' ? opts.active : macroPadTerminalIsFocused();
+  if (!taskId && !active) return;
+  fetch('/api/integrations/macropad/focus', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ taskId, active }),
+    keepalive: !!opts.keepalive,
+  }).catch(() => {});
+}
+
+window.addEventListener('focus', publishMacroPadTerminalFocus);
+window.addEventListener('blur', () => publishMacroPadTerminalFocus({ active: false, keepalive: true }));
+document.addEventListener('visibilitychange', () => publishMacroPadTerminalFocus({
+  active: document.visibilityState === 'visible' ? undefined : false,
+  keepalive: document.visibilityState !== 'visible',
+}));
+setInterval(publishMacroPadTerminalFocus, MACROPAD_FOCUS_HEARTBEAT_MS);
+
 function openTab(task) {
   tabs.open(task);
 }
@@ -1700,6 +1744,7 @@ $('#tdMedia').addEventListener('click', () => {
 });
 $('#drawerChevron').addEventListener('click', () => {
   $('#drawer').classList.toggle('collapsed');
+  publishMacroPadTerminalFocus();
   const tab = tabs.map.get(tabs.activeId);
   if (tab) requestAnimationFrame(() => tabs.fit(tab));
 });
@@ -3597,7 +3642,10 @@ window.addEventListener('control-center-extensions-ready', () => {
   cardCaches.clear();
   renderBoard();
 });
-window.addEventListener('beforeunload', persistUiState);
+window.addEventListener('beforeunload', () => {
+  persistUiState();
+  publishMacroPadTerminalFocus({ active: false, keepalive: true });
+});
 
 /* ----------------------------------------------------------------- boot */
 

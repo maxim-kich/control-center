@@ -87,6 +87,8 @@ Codex and Claude tasks launch real interactive CLI sessions through `node-pty`. 
 
 Claude launches use generated hook settings under `CONTROL_CENTER_HOME` and strip Anthropic API-token environment variables from child sessions so the Claude CLI uses the user's normal subscription auth.
 
+When the browser window and an embedded terminal tab are focused, Control Center publishes a short-lived loopback-only focus lease for MacroPad. This lets MacroPad read that PTY's provider/status and send raw Codex or Claude keyboard input to the exact active task. The lease is cleared when the browser, drawer, tab, or session loses focus.
+
 ## Import
 
 Legacy Control Center databases can be imported without copying runtime files:
