@@ -53,9 +53,19 @@ function trashIcon() {
 }
 
 const $ = (sel) => document.querySelector(sel);
+
+function reloadForChangedServerBoot(response) {
+  const responseBootId = response && response.headers.get('x-control-center-boot-id');
+  if (!responseBootId || !currentBootId || responseBootId === currentBootId) return false;
+  restartingServer = true;
+  window.location.reload();
+  return true;
+}
+
 const api = {
   async get(url) {
     const r = await fetch(url);
+    if (reloadForChangedServerBoot(r)) return new Promise(() => {});
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
     return r.json();
   },
@@ -65,6 +75,7 @@ const api = {
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
+    if (reloadForChangedServerBoot(r)) return new Promise(() => {});
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || r.statusText);
     return data;
@@ -152,7 +163,8 @@ let selectedProjectId = null;
 const SETTINGS_SECTIONS = ['general', 'models', 'skills', 'extensions'];
 let currentPage = 'dashboard';
 let currentSettingsSection = 'general';
-let showArchive = false;
+let dashboardShowArchive = false;
+let projectArchiveVisibility = {};
 let healthYoloDefault = true;
 let ultracodeEnabled = false;
 let currentBootId = null;
@@ -245,7 +257,8 @@ function persistedUiState() {
     selectedProjectId,
     settingsSection: currentSettingsSection,
     projectFilter,
-    showArchive,
+    dashboardShowArchive,
+    projectArchiveVisibility,
     collapsedProjectSections: collapsedProjectSections(),
   };
 }
@@ -275,7 +288,12 @@ function restoreUiStateForBoot() {
   currentSettingsSection = SETTINGS_SECTIONS.includes(state.settingsSection) ? state.settingsSection : currentSettingsSection;
   selectedProjectId = state.selectedProjectId || selectedProjectId;
   projectFilter = typeof state.projectFilter === 'string' ? state.projectFilter : projectFilter;
-  showArchive = !!state.showArchive;
+  // `showArchive` is the legacy shared setting. Preserve it only as the
+  // dashboard preference while project boards get independent preferences.
+  dashboardShowArchive = state.dashboardShowArchive == null ? !!state.showArchive : !!state.dashboardShowArchive;
+  projectArchiveVisibility = state.projectArchiveVisibility && typeof state.projectArchiveVisibility === 'object'
+    ? { ...state.projectArchiveVisibility }
+    : {};
   requestAnimationFrame(() => applyCollapsedProjectSections(state.collapsedProjectSections));
   uiStateRestoring = false;
   return true;
@@ -587,7 +605,7 @@ function isEditable(t) {
   return !!t && t.status === 'backlog' && !t.started_at && !t.session_id && !t.archived;
 }
 
-function taskSource(includeArchived = showArchive) {
+function taskSource(includeArchived = dashboardShowArchive) {
   const base = includeArchived ? [...TASKS, ...archivedCache] : TASKS;
   const seen = new Set();
   const out = [];
@@ -622,9 +640,12 @@ function taskBoardSignature(t) {
 }
 
 function boardSignature() {
-  const sigTasks = showArchive ? [...TASKS, ...archivedCache] : TASKS;
+  const project = selectedProject();
+  const projectShowArchive = projectArchiveIsVisible(project);
+  const sigTasks = dashboardShowArchive || projectShowArchive ? [...TASKS, ...archivedCache] : TASKS;
   return JSON.stringify({
-    showArchive,
+    dashboardShowArchive,
+    projectShowArchive,
     projectFilter,
     selectedProjectId,
     extensionRenderVersion: extensionRenderVersion(),
@@ -781,7 +802,7 @@ function boardCardCache(boardKey) {
 function projectBoardTasks() {
   const project = selectedProject();
   if (!project) return [];
-  return taskSource().filter((t) => t.project_path === project.path);
+  return taskSource(projectArchiveIsVisible(project)).filter((t) => t.project_path === project.path);
 }
 
 function renderBoard() {
@@ -863,18 +884,18 @@ function renderCard(t) {
 
   const actions = h('div', { class: 'card-actions' });
   if (t.archived) {
-    actions.append(h('button', { class: 'btn btn-sm', onclick: () => openDetails(t.id) }, '☰ Details'));
-    actions.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => unarchiveTask(t) }, '⟲ Unarchive'));
+    actions.append(h('button', { class: 'btn btn-sm', onclick: () => openDetails(t.id) }, 'Details'));
+    actions.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => unarchiveTask(t) }, 'Unarchive'));
   } else if (t.status === 'backlog') {
     // Backlog = not started yet → editable, and Start launches it.
-    actions.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => startTask(t) }, '▶ Start'));
-    actions.append(h('button', { class: 'btn btn-sm', onclick: () => openTaskModal(t) }, '✎ Edit'));
+    actions.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => startTask(t) }, 'Start'));
+    actions.append(h('button', { class: 'btn btn-sm', onclick: () => openTaskModal(t) }, 'Edit'));
     if (isEditable(t)) actions.append(h('button', { class: 'btn btn-ghost btn-sm', onclick: () => deleteTask(t) }, 'Delete'));
     actions.append(h('button', { class: 'btn btn-ghost btn-sm', onclick: () => archiveTask(t) }, 'Archive'));
   } else {
-    actions.append(h('button', { class: 'btn btn-sm', onclick: () => (t.live ? openTab(t) : resumeTask(t)) }, t.live ? '⧉ Open' : '▶ Resume'));
-    actions.append(h('button', { class: 'btn btn-sm', onclick: () => openDetails(t.id) }, '☰ Details'));
-    if (t.session_id) actions.append(h('button', { class: 'btn btn-sm', onclick: () => forkTask(t) }, '⑂ Fork'));
+    actions.append(h('button', { class: 'btn btn-sm', onclick: () => (t.live ? openTab(t) : resumeTask(t)) }, t.live ? 'Open' : 'Resume'));
+    actions.append(h('button', { class: 'btn btn-sm', onclick: () => openDetails(t.id) }, 'Details'));
+    if (t.session_id) actions.append(h('button', { class: 'btn btn-sm', onclick: () => forkTask(t) }, 'Fork'));
     actions.append(h('button', { class: 'btn btn-ghost btn-sm', onclick: () => archiveTask(t) }, 'Archive'));
   }
   actions.append(...renderExtensionNodes('taskActions', { task: t }, 'task-card'));
@@ -988,7 +1009,7 @@ async function archiveTask(t) {
   try {
     tabs.remove(t.id, { stop: true });
     await api.send('POST', `/api/tasks/${t.id}/archive`);
-    if (showArchive) await loadArchived();
+    if (archivesAreVisible()) await loadArchived();
     await refresh(true);
     toast('Archived “' + t.title + '”', { undo: () => unarchiveTask(t, true) });
   } catch (e) {
@@ -1041,6 +1062,7 @@ function syncTaskProviderControls(task) {
   select.replaceChildren(...models.map((m) => h('option', { value: m.id }, m.label || modelLabel(m.id))));
   select.value = task ? task.model : provider.defaultModel || models[0].id;
   if (!select.value && models[0]) select.value = models[0].id;
+  syncCustomSelect(select);
 
   const modes = provider.modes && provider.modes.length ? provider.modes : ['build', 'plan'];
   for (const card of document.querySelectorAll('.mode-card')) {
@@ -1178,6 +1200,117 @@ function selectProject(path, name) {
   $('#f_projectPath').value = '';
   $('#projectManualToggle').textContent = 'Enter a path manually';
 }
+
+/* Native selects retain their form value/event contract, but their browser-owned
+   option popovers are replaced with the same in-app menu pattern as Project. */
+const customSelectControls = new Map();
+
+function closeCustomSelects(except) {
+  for (const [select, control] of customSelectControls) {
+    if (select === except) continue;
+    control.menu.hidden = true;
+    control.trigger.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function syncCustomSelect(select) {
+  const control = customSelectControls.get(select);
+  if (control) control.render();
+}
+
+function enhanceCustomSelect(select) {
+  if (!select || customSelectControls.has(select)) return;
+  const wrapper = h('div', { class: 'custom-select' });
+  const label = h('span', { class: 'custom-select-label' });
+  const trigger = h('button', {
+    type: 'button',
+    class: 'project-trigger custom-select-trigger',
+    'aria-haspopup': 'listbox',
+    'aria-expanded': 'false',
+  }, label, h('span', { class: 'caret', 'aria-hidden': 'true' }, '▾'));
+  const menu = h('div', { class: 'project-menu custom-select-menu', role: 'listbox', hidden: true });
+
+  select.before(wrapper);
+  wrapper.append(select, trigger, menu);
+  select.hidden = true;
+  select.tabIndex = -1;
+  select.setAttribute('aria-hidden', 'true');
+
+  const render = () => {
+    const selected = select.options[select.selectedIndex] || select.options[0];
+    label.textContent = selected ? selected.textContent : 'Select…';
+    trigger.disabled = select.disabled;
+    trigger.title = select.title || '';
+    menu.replaceChildren(...[...select.options].map((option) => h('button', {
+      type: 'button',
+      class: 'project-item custom-select-option' + (option.selected ? ' selected' : ''),
+      role: 'option',
+      'aria-selected': option.selected ? 'true' : 'false',
+      disabled: option.disabled,
+      onclick: (ev) => {
+        ev.stopPropagation();
+        select.value = option.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        menu.hidden = true;
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.focus();
+      },
+    }, h('span', {}, option.textContent), option.selected ? h('span', { class: 'custom-select-check', 'aria-hidden': 'true' }, '✓') : null)));
+  };
+
+  trigger.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const opening = menu.hidden;
+    closeCustomSelects(select);
+    menu.hidden = !opening;
+    trigger.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  });
+  trigger.addEventListener('keydown', (ev) => {
+    if (!['ArrowDown', 'ArrowUp', 'Enter', ' ', 'Escape'].includes(ev.key)) return;
+    ev.preventDefault();
+    if (ev.key === 'Escape') {
+      menu.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      return;
+    }
+    if (menu.hidden) {
+      closeCustomSelects(select);
+      menu.hidden = false;
+      trigger.setAttribute('aria-expanded', 'true');
+    }
+    const options = [...menu.querySelectorAll('.custom-select-option:not(:disabled)')];
+    const selectedIndex = options.findIndex((item) => item.getAttribute('aria-selected') === 'true');
+    const target = ev.key === 'ArrowUp' ? options[Math.max(0, selectedIndex - 1)] : options[Math.max(0, selectedIndex)];
+    if (target) target.focus();
+  });
+  menu.addEventListener('keydown', (ev) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'Escape'].includes(ev.key)) return;
+    ev.preventDefault();
+    if (ev.key === 'Escape') {
+      menu.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.focus();
+      return;
+    }
+    const options = [...menu.querySelectorAll('.custom-select-option:not(:disabled)')];
+    const current = options.indexOf(document.activeElement);
+    let next = current;
+    if (ev.key === 'Home') next = 0;
+    else if (ev.key === 'End') next = options.length - 1;
+    else if (ev.key === 'ArrowDown') next = Math.min(options.length - 1, current + 1);
+    else if (ev.key === 'ArrowUp') next = Math.max(0, current - 1);
+    if (options[next]) options[next].focus();
+  });
+  select.addEventListener('change', render);
+  new MutationObserver(render).observe(select, { childList: true, subtree: true, characterData: true, attributes: true });
+  customSelectControls.set(select, { wrapper, trigger, menu, render });
+  render();
+}
+
+document.addEventListener('click', (ev) => {
+  if (!ev.target.closest('.custom-select')) closeCustomSelects();
+});
 
 /* ------- context-file upload (New task) ------- */
 $('#f_uploadBtn').addEventListener('click', (ev) => {
@@ -1403,15 +1536,15 @@ function renderDetailBar(t) {
   const bar = $('#dBar');
   bar.replaceChildren();
   if (t.archived) {
-    bar.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => { unarchiveTask(t); hide('detailsModal'); } }, '⟲ Unarchive'));
+    bar.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => { unarchiveTask(t); hide('detailsModal'); } }, 'Unarchive'));
     return;
   }
   if (isEditable(t)) {
-    bar.append(h('button', { class: 'btn btn-sm', onclick: () => { hide('detailsModal'); openTaskModal(t); } }, '✎ Edit'));
-    bar.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => { hide('detailsModal'); startTask(t); } }, '▶ Start'));
+    bar.append(h('button', { class: 'btn btn-sm', onclick: () => { hide('detailsModal'); openTaskModal(t); } }, 'Edit'));
+    bar.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => { hide('detailsModal'); startTask(t); } }, 'Start'));
   } else {
-    bar.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => { hide('detailsModal'); t.live ? openTab(t) : resumeTask(t); } }, t.live ? '⧉ Open' : '▶ Resume'));
-    if (t.session_id) bar.append(h('button', { class: 'btn btn-sm', onclick: () => { hide('detailsModal'); forkTask(t); } }, '⑂ Fork'));
+    bar.append(h('button', { class: 'btn btn-primary btn-sm', onclick: () => { hide('detailsModal'); t.live ? openTab(t) : resumeTask(t); } }, t.live ? 'Open' : 'Resume'));
+    if (t.session_id) bar.append(h('button', { class: 'btn btn-sm', onclick: () => { hide('detailsModal'); forkTask(t); } }, 'Fork'));
   }
   bar.append(h('span', { class: 'spacer' }));
   bar.append(h('button', { class: 'btn btn-ghost btn-sm', onclick: () => { archiveTask(t); hide('detailsModal'); } }, 'Archive'));
@@ -1564,7 +1697,6 @@ const tabs = {
       tb.tabEl.classList.toggle('active', on);
     }
     this.updateDetail();
-    this.refreshUsage();
     this.sync();
     const tab = this.map.get(taskId);
     if (tab) requestAnimationFrame(() => {
@@ -1616,25 +1748,8 @@ const tabs = {
   updateDetail() {
     const t = byId.get(this.activeId);
     if (!t) return;
-    $('#tdPath').textContent = displayProject(t.project_path);
-    $('#tdModel').textContent = modelLabel(t.model);
-    $('#tdEffort').textContent = 'effort: ' + effortLabel(t.effort);
-    $('#tdTokens').textContent = 'tokens —';
-    $('#tdContext').textContent = 'ctx —';
-  },
-
-  async refreshUsage() {
-    const id = this.activeId;
-    if (!id) return;
-    try {
-      const u = await api.get(`/api/tasks/${id}/usage`);
-      if (this.activeId !== id) return;
-      const hasUsage = u.tokensInput || u.tokensOutput || u.contextTokens || u.modelContextWindow;
-      $('#tdTokens').textContent = hasUsage ? 'in ' + fmtNum(u.tokensInput) + ' / out ' + fmtNum(u.tokensOutput) : 'tokens —';
-      $('#tdContext').textContent = hasUsage ? 'ctx ' + fmtNum(u.contextTokens) + (u.modelContextWindow ? ' / ' + fmtNum(u.modelContextWindow) : '') : 'ctx —';
-    } catch {
-      /* best-effort */
-    }
+    $('#tdProject').textContent = displayProject(t.project_path);
+    $('#tdPath').textContent = t.project_path || '';
   },
 
   sync() {
@@ -1966,6 +2081,11 @@ function setPage(page) {
 $('#dashboardPageBtn').addEventListener('click', () => setPage('dashboard'));
 $('#projectsPageBtn').addEventListener('click', () => setPage('projects'));
 $('#settingsPageBtn').addEventListener('click', () => setPage('settings'));
+$('#appHomeLink').addEventListener('click', (ev) => {
+  if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+  ev.preventDefault();
+  setPage('dashboard');
+});
 $('#refreshModelsBtn').addEventListener('click', loadModelConnections);
 $('#createSkillBtn').addEventListener('click', startSkillCreate);
 $('#installSkillBtn').addEventListener('click', openSkillInstallModal);
@@ -1996,22 +2116,51 @@ $('#migrationWelcomeBtn').addEventListener('click', () => loadMigrationWelcome(t
 function syncArchiveToggles() {
   const dashboardToggle = $('#showArchive');
   const projectToggle = $('#projectShowArchive');
-  if (dashboardToggle) dashboardToggle.checked = showArchive;
-  if (projectToggle) projectToggle.checked = showArchive;
+  const project = selectedProject();
+  if (dashboardToggle) dashboardToggle.checked = dashboardShowArchive;
+  if (projectToggle) {
+    projectToggle.checked = projectArchiveIsVisible(project);
+    projectToggle.disabled = !project;
+  }
 }
 
-async function setShowArchive(checked) {
-  showArchive = checked;
+function projectArchiveIsVisible(project = selectedProject()) {
+  return !!(project && projectArchiveVisibility[project.id]);
+}
+
+function archivesAreVisible() {
+  return dashboardShowArchive || Object.values(projectArchiveVisibility).some(Boolean);
+}
+
+async function refreshArchiveSource() {
+  if (archivesAreVisible()) await loadArchived();
+  else {
+    archivedCache = [];
+    rebuildIndex();
+  }
+}
+
+async function setDashboardShowArchive(checked) {
+  dashboardShowArchive = checked;
   syncArchiveToggles();
-  if (showArchive) await loadArchived();
-  else { archivedCache = []; rebuildIndex(); }
+  await refreshArchiveSource();
   renderBoard();
   syncProjectFilter();
   persistUiState();
 }
 
-$('#showArchive').addEventListener('change', () => setShowArchive($('#showArchive').checked));
-$('#projectShowArchive').addEventListener('change', () => setShowArchive($('#projectShowArchive').checked));
+async function setProjectShowArchive(checked) {
+  const project = selectedProject();
+  if (!project) return;
+  projectArchiveVisibility = { ...projectArchiveVisibility, [project.id]: checked };
+  syncArchiveToggles();
+  await refreshArchiveSource();
+  renderBoard();
+  persistUiState();
+}
+
+$('#showArchive').addEventListener('change', () => setDashboardShowArchive($('#showArchive').checked));
+$('#projectShowArchive').addEventListener('change', () => setProjectShowArchive($('#projectShowArchive').checked));
 
 function syncProjectFilter() {
   const sel = $('#projectFilter');
@@ -2028,6 +2177,7 @@ function syncProjectFilter() {
   sel.replaceChildren(...want.map(([v, label]) => h('option', { value: v }, label)));
   sel.value = want.some(([v]) => v === current) ? current : '';
   projectFilter = sel.value;
+  syncCustomSelect(sel);
 }
 $('#projectFilter').addEventListener('change', () => {
   projectFilter = $('#projectFilter').value;
@@ -2038,7 +2188,8 @@ $('#projectFilter').addEventListener('change', () => {
 /* -------------------------------------------------------- project page */
 
 function projectTaskCount(projectPath) {
-  return taskSource().filter((t) => t.project_path === projectPath).length;
+  const project = projectByPath(projectPath);
+  return taskSource(projectArchiveIsVisible(project)).filter((t) => t.project_path === projectPath).length;
 }
 
 function projectNeedsAttention(projectPath) {
@@ -2051,6 +2202,7 @@ function projectNeedsAttention(projectPath) {
 
 function selectProjectPage(id) {
   selectedProjectId = id;
+  syncArchiveToggles();
   renderBoard();
   persistUiState();
 }
@@ -2105,6 +2257,7 @@ function renderProjectsPage() {
   $('#projectMediaBtn').disabled = !project;
   $('#editProjectBtn').disabled = !project;
   $('#newProjectTaskBtn').disabled = !project;
+  syncArchiveToggles();
   renderProjectExtensionActions(project);
 }
 
@@ -3054,7 +3207,7 @@ function updateSettingsAttention() {
   const providers = MODEL_CONNECTIONS.providers || [];
   const active = providers.find((p) => p.active);
   const needsSetup = !!(active && (!active.installed || !active.connected));
-  btn.classList.toggle('needs-attention', needsSetup);
+  btn.classList.remove('needs-attention');
   btn.title = needsSetup ? `${active.name} needs setup before task launches` : '';
 }
 
@@ -3603,6 +3756,8 @@ window.addEventListener('beforeunload', persistUiState);
 
 async function init() {
   showRestoreLoading('Checking server boot...');
+  enhanceCustomSelect($('#projectFilter'));
+  enhanceCustomSelect($('#f_model'));
   notifier.init();
   await loadHealth();
   restoreUiStateForBoot();
@@ -3610,7 +3765,7 @@ async function init() {
   await loadExtensions({ quiet: true });
   restoreLoadingStep('Loading projects...');
   await loadProjects();
-  if (showArchive) {
+  if (archivesAreVisible()) {
     restoreLoadingStep('Loading archived tasks...');
     await loadArchived();
   }
@@ -3642,5 +3797,4 @@ setInterval(() => {
   if ($('#taskModal').hidden && $('#detailsModal').hidden && $('#mediaModal').hidden && $('#skillInstallModal').hidden && $('#extensionInstallModal').hidden && $('#extensionModal').hidden) refresh();
   else tabs.sync();
   if (currentPage === 'projects' && !shouldDeferBoardRender()) loadProjects();
-  if (!$('#drawer').hidden && tabs.activeId) tabs.refreshUsage();
 }, 2500);

@@ -221,3 +221,46 @@ test('managed migrations require permission, run transactionally, and persist ap
     fs.rmSync(fx.root, { recursive: true, force: true });
   }
 });
+
+test('enabling a newly discovered external extension preserves migration state and records provenance', () => {
+  const fx = fixture();
+  const sqlite = new Database(':memory:');
+  sqlite.exec('CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  fx.db = {
+    db: sqlite,
+    getMetaValue(key, fallback = null) {
+      const row = sqlite.prepare('SELECT value FROM app_meta WHERE key = ?').get(key);
+      return row ? row.value : fallback;
+    },
+    setMetaValue(key, value) {
+      sqlite.prepare(`
+        INSERT INTO app_meta (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(key, String(value));
+      return String(value);
+    },
+  };
+  try {
+    const platform = new ExtensionPlatform(fx);
+    platform.prepare();
+    const dir = writeBundle(fx.extensionsDir, 'external-data', '2.3.4', { permissions: ['migrations:run'] });
+    const manifestPath = path.join(dir, 'extension.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.migrations = [{ id: 'external-data-001', path: 'migrations/001.sql' }];
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    fs.mkdirSync(path.join(dir, 'migrations'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'migrations', '001.sql'), 'CREATE TABLE external_records (id TEXT PRIMARY KEY);');
+
+    const enabled = platform.enable('external-data');
+    const state = platform.stateFor('external-data');
+    assert.equal(enabled.enabled, true);
+    assert.equal(state.origin, 'external');
+    assert.equal(state.installedVersion, '2.3.4');
+    assert.ok(state.installedAt);
+    assert.ok(state.migrations['external-data-001'].appliedAt);
+    assert.ok(sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'external_records'").get());
+  } finally {
+    sqlite.close();
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});

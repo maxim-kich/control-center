@@ -110,6 +110,10 @@ const app = express();
 const jsonParser = express.json({ limit: '2mb' });
 const extensionUploadJsonParser = express.json({ limit: '30mb' });
 app.use((req, res, next) => {
+  res.setHeader('X-Control-Center-Boot-Id', BOOT_ID);
+  next();
+});
+app.use((req, res, next) => {
   if (req.path.startsWith('/api/media')) return next();
   if (req.path === '/api/extensions/install-folder') return next();
   return jsonParser(req, res, next);

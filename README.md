@@ -1,3 +1,7 @@
+## Slop-Disclaimer
+
+It's a vibe coded experiment that helps me personally to control my coding agents according to my mental model. Use it as you wish. There is no contribution expected. And of course this readme was not meant to be read by humans, let your agent read and explain it for you.
+
 # Control Center
 
 Control Center is a local web app for managing AI coding tasks and launching real interactive provider CLIs in an embedded terminal. The current release supports Codex and Claude launches.

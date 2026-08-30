@@ -20,7 +20,14 @@
   <!-- top navigation -->
   <header class="topbar">
     <div class="brand">
-      <h1>Control Center</h1>
+      <h1 class="brand-title">
+        <a id="appHomeLink" class="brand-home" href="/" aria-label="Control Center home" title="Go to Dashboard"><span class="brand-ascii-logo" aria-hidden="true"> ██████╗  ██████╗ ███╗   ██╗████████╗██████╗   ██████╗ ██╗         ██████╗███████╗███╗   ██╗████████╗███████╗██████╗
+██╔════╝ ██╔═══██╗████╗  ██║╚══██╔══╝██╔══██╗ ██╔═══██╗██║        ██╔════╝██╔════╝████╗  ██║╚══██╔══╝██╔════╝██╔══██╗
+██║      ██║   ██║██╔██╗ ██║   ██║   ██████╔╝ ██║   ██║██║        ██║     █████╗  ██╔██╗ ██║   ██║   █████╗  ██████╔╝
+██║      ██║   ██║██║╚██╗██║   ██║   ██╔══██╗ ██║   ██║██║        ██║     ██╔══╝  ██║╚██╗██║   ██║   ██╔══╝  ██╔══██╗
+╚██████╗ ╚██████╔╝██║ ╚████║   ██║   ██║  ██║ ╚██████╔╝███████╗   ╚██████╗███████╗██║ ╚████║   ██║   ███████╗██║  ██║
+ ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝  ╚═════╝ ╚══════╝    ╚═════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝╚═╝  ╚═╝</span></a>
+      </h1>
       <nav class="page-tabs" aria-label="Pages">
         <button id="dashboardPageBtn" class="page-tab active" type="button" data-page="dashboard">Dashboard</button>
         <button id="projectsPageBtn" class="page-tab" type="button" data-page="projects">Projects</button>
@@ -55,7 +62,7 @@
         <select id="projectFilter" class="filter-select" title="Filter by project">
           <option value="">All projects</option>
         </select>
-        <button id="newTaskBtn" class="btn btn-primary">+ New task</button>
+        <button id="newTaskBtn" class="btn btn-primary">New task</button>
       </div>
     </div>
 
@@ -86,7 +93,6 @@
             <span id="projectListCount" class="count">0</span>
           </div>
           <button id="newProjectBtn" class="btn btn-primary btn-sm project-new-btn" type="button">
-            <span aria-hidden="true">+</span>
             <span>New</span>
           </button>
         </div>
@@ -105,8 +111,8 @@
             </label>
             <div id="projectExtensionActions" class="extension-action-group"></div>
             <button id="projectMediaBtn" class="btn btn-sm" type="button" disabled>Media</button>
-            <button id="editProjectBtn" class="btn btn-sm" type="button" disabled>✎ Edit</button>
-            <button id="newProjectTaskBtn" class="btn btn-primary btn-sm" type="button" disabled>+ New task</button>
+            <button id="editProjectBtn" class="btn btn-sm" type="button" disabled>Edit</button>
+            <button id="newProjectTaskBtn" class="btn btn-primary btn-sm" type="button" disabled>New task</button>
           </div>
         </header>
         <div class="board-scroll project-board-scroll">
@@ -492,7 +498,7 @@
           <h3 id="dTitle">Task</h3>
           <div class="conv-meta" id="dMeta"></div>
         </div>
-        <button class="icon-btn" data-close="detailsModal">✕</button>
+        <button class="btn btn-sm" data-close="detailsModal">Close</button>
       </header>
       <div class="details-scroll" id="dBody"></div>
       <footer class="details-bar" id="dBar"></footer>
@@ -508,7 +514,7 @@
           <div class="conv-meta" id="mediaSub">USER_UPLOADS</div>
         </div>
         <div class="modal-head-actions">
-          <label class="btn btn-sm file-picker-label" id="mediaUploadBtn" for="mediaUploadInput">⤒ Upload</label>
+          <label class="btn btn-sm file-picker-label" id="mediaUploadBtn" for="mediaUploadInput">Upload</label>
           <input type="file" id="mediaUploadInput" class="file-picker-input" multiple />
           <button class="icon-btn" data-close="mediaModal">✕</button>
         </div>
@@ -535,7 +541,7 @@
         <button class="icon-btn" data-close="extensionModal">✕</button>
       </header>
       <div class="extension-modal-body" id="extensionModalBody"></div>
-      <footer class="form-actions" id="extensionModalActions"></footer>
+      <footer class="form-actions extension-modal-actions" id="extensionModalActions"></footer>
     </div>
   </div>
 
@@ -548,15 +554,12 @@
     </div>
     <div class="tabdetail" id="tabDetail">
       <div class="td-info">
+        <span class="td-project" id="tdProject"></span>
         <span class="td-path" id="tdPath"></span>
-        <span class="td-metric" id="tdTokens" title="Tokens in / out">—</span>
-        <span class="td-metric" id="tdContext" title="Context window usage">—</span>
-        <span class="td-chip" id="tdModel"></span>
-        <span class="td-chip" id="tdEffort"></span>
       </div>
       <div class="td-actions">
-        <button id="tdMedia" class="btn btn-sm" title="Browse / upload project media">🖼 Media</button>
-        <button id="termDone" class="btn btn-primary btn-sm" title="Mark this task Done and end the session">✓ Done</button>
+        <button id="tdMedia" class="btn btn-sm" title="Browse / upload project media">Media</button>
+        <button id="termDone" class="btn btn-primary btn-sm" title="Mark this task Done and end the session">Done</button>
       </div>
     </div>
     <div class="term-area" id="termArea"></div>
