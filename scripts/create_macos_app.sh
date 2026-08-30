@@ -63,28 +63,28 @@ cat > "${RESOURCES_DIR}/AppIcon.svg" <<'SVG'
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="bg" x1="164" y1="112" x2="860" y2="912" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#fb923c"/>
-      <stop offset="0.48" stop-color="#ea580c"/>
-      <stop offset="1" stop-color="#7c2d12"/>
+      <stop offset="0" stop-color="#42c07e"/>
+      <stop offset="0.48" stop-color="#348f61"/>
+      <stop offset="1" stop-color="#274033"/>
     </linearGradient>
     <linearGradient id="screen" x1="205" y1="250" x2="819" y2="770" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1c1917"/>
-      <stop offset="1" stop-color="#292524"/>
+      <stop offset="0" stop-color="#111211"/>
+      <stop offset="1" stop-color="#202221"/>
     </linearGradient>
     <linearGradient id="accent" x1="292" y1="424" x2="714" y2="632" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#fed7aa"/>
-      <stop offset="1" stop-color="#fdba74"/>
+      <stop offset="0" stop-color="#c8f5dc"/>
+      <stop offset="1" stop-color="#72dca3"/>
     </linearGradient>
   </defs>
   <rect x="92" y="92" width="840" height="840" rx="190" fill="url(#bg)"/>
   <rect x="172" y="238" width="680" height="548" rx="74" fill="url(#screen)" opacity="0.96"/>
-  <circle cx="250" cy="312" r="24" fill="#fecaca"/>
-  <circle cx="322" cy="312" r="24" fill="#fed7aa"/>
-  <circle cx="394" cy="312" r="24" fill="#fde68a"/>
+  <circle cx="250" cy="312" r="24" fill="#48765e"/>
+  <circle cx="322" cy="312" r="24" fill="#42c07e"/>
+  <circle cx="394" cy="312" r="24" fill="#72dca3"/>
   <path d="M314 510L438 420" fill="none" stroke="url(#accent)" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M314 510L438 600" fill="none" stroke="url(#accent)" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M506 626H710" fill="none" stroke="#fff7ed" stroke-width="56" stroke-linecap="round"/>
-  <rect x="226" y="700" width="572" height="22" rx="11" fill="#fdba74" opacity="0.36"/>
+  <path d="M506 626H710" fill="none" stroke="#e7f2e9" stroke-width="56" stroke-linecap="round"/>
+  <rect x="226" y="700" width="572" height="22" rx="11" fill="#72dca3" opacity="0.36"/>
 </svg>
 SVG
 
