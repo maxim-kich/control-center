@@ -1440,6 +1440,29 @@ body.restore-loading-active > :not(.restore-loading) {
 .form input:focus, .form textarea:focus, .form select:focus { outline: none; border-color: var(--accent); }
 .form textarea { resize: vertical; font-family: var(--mono); font-size: 13px; }
 .form-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 4px; }
+.form.task-form {
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.task-form-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.task-form-actions {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-2) 84%, var(--bg));
+}
 .form-danger-actions { margin-right: auto; display: flex; align-items: center; gap: 8px; }
 
 .field-row { display: flex; gap: 14px; align-items: stretch; }

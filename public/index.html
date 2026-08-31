@@ -366,7 +366,8 @@
         <h3 id="taskModalTitle">New task</h3>
         <button class="icon-btn" data-close="taskModal">✕</button>
       </header>
-      <form id="taskForm" class="form">
+      <form id="taskForm" class="form task-form">
+        <div class="task-form-scroll">
         <input type="hidden" id="taskId" />
         <label>Title
           <input type="text" id="f_title" required placeholder="Fix the login redirect bug" />
@@ -443,8 +444,9 @@
         <label class="checkbox yolo-line" title="Legacy setting kept for old tasks. No Codex equivalent is wired yet.">
           <input type="checkbox" id="f_ultracode" /> Ultracode <span class="hint">(legacy no-op)</span>
         </label>
+        </div>
 
-        <div class="form-actions">
+        <div class="form-actions task-form-actions">
           <button type="button" class="btn" data-close="taskModal">Cancel</button>
           <button type="submit" class="btn btn-primary">Save</button>
         </div>

@@ -63,6 +63,13 @@ test('bundled integration modal actions keep page-edge padding', () => {
   assert.match(css, /\.extension-modal-actions\s*\{[\s\S]*?padding:\s*var\(--space-3\) var\(--space-4\) var\(--space-4\);/);
 });
 
+test('task form actions stay outside the scrollable form content', () => {
+  assert.match(html, /<form id="taskForm" class="form task-form">[\s\S]*?<div class="task-form-scroll">[\s\S]*?<\/div>\s*<div class="form-actions task-form-actions">/);
+  assert.match(css, /\.form\.task-form\s*\{[\s\S]*?overflow:\s*hidden;/);
+  assert.match(css, /\.task-form-scroll\s*\{[\s\S]*?overflow:\s*auto;/);
+  assert.match(css, /\.task-form-actions\s*\{[\s\S]*?flex:\s*0 0 auto;[\s\S]*?border-top:/);
+});
+
 test('a server boot change reloads stale extension UI state', () => {
   assert.match(server, /res\.setHeader\('X-Control-Center-Boot-Id', BOOT_ID\);/);
   assert.match(app, /function reloadForChangedServerBoot\(response\)[\s\S]*?response\.headers\.get\('x-control-center-boot-id'\)/);
