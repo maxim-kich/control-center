@@ -94,7 +94,7 @@ async function fetchTask(base, taskId) {
   return tasks.find((t) => t.id === taskId);
 }
 
-test('typing in a reattached idle terminal does not mark the task running', async () => {
+test('Codex Stop reaches needs-attention, typing preserves it, and submitting resumes running', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-status-'));
   const workspace = path.join(tmp, 'workspace');
   const project = path.join(workspace, 'project');
@@ -124,6 +124,8 @@ test('typing in a reattached idle terminal does not mark the task running', asyn
     cwd: ROOT,
     env: {
       ...process.env,
+      CONTROL_CENTER_HOME: path.join(tmp, 'home'),
+      CC_EXTENSIONS_DIR: path.join(tmp, 'extensions'),
       PORT: String(port),
       CC_WORKSPACE_ROOT: workspace,
       CC_DB_PATH: dbPath,
@@ -147,6 +149,29 @@ test('typing in a reattached idle terminal does not mark the task running', asyn
     assert.equal(listed.live, true);
     assert.equal(listed.displayStatus, 'needs_attention');
 
+    const hook = async (event, input) => {
+      const child = spawn(process.execPath, [path.join(ROOT, '.codex-dashboard/hooks/task_event.js'), event], {
+        env: { ...process.env, CC_DB_PATH: dbPath, CC_TASK_ID: task.id, CC_LOG_DIR: path.join(tmp, 'logs') },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      child.stdout.on('data', data => { stdout += data; });
+      child.stdin.end(JSON.stringify(input));
+      const [code] = await once(child, 'close');
+      assert.equal(code, 0);
+      if (event === 'Stop') assert.deepEqual(JSON.parse(stdout), {});
+    };
+    await hook('UserPromptSubmit', { session_id: 'sess-1' });
+    assert.equal((await fetchTask(base, task.id)).displayStatus, 'running');
+    await hook('Stop', { hook_event_name: 'Stop', session_id: readTask(dbPath, task.id).session_id, last_assistant_message: 'Done', stop_hook_active: false });
+    const deadline = Date.now() + 3000;
+    do {
+      listed = await fetchTask(base, task.id);
+      if (listed.displayStatus === 'needs_attention') break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } while (Date.now() < deadline);
+    assert.equal(listed.displayStatus, 'needs_attention', 'Stop must become visible through the task API within 3 seconds');
+
     ws.send(JSON.stringify({ t: 'user-input' }));
     ws.send(JSON.stringify({ t: 'data', d: 'editing prompt only' }));
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -154,6 +179,9 @@ test('typing in a reattached idle terminal does not mark the task running', asyn
     listed = await fetchTask(base, task.id);
     assert.equal(listed.displayStatus, 'needs_attention');
     assert.equal(readTask(dbPath, task.id).activity, 'idle');
+
+    await hook('UserPromptSubmit', { session_id: 'sess-1' });
+    assert.equal((await fetchTask(base, task.id)).displayStatus, 'running');
 
     ws.close();
     await Promise.race([once(ws, 'close'), new Promise((resolve) => setTimeout(resolve, 500))]);

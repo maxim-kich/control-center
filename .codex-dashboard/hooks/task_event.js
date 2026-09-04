@@ -4,6 +4,8 @@
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
+const crypto = require('crypto');
+const paths = require('../../lib/core/paths');
 
 const TRANSCRIPT_TAIL_BYTES = 1024 * 1024;
 const STOP_COMPLETE_WAIT_MS = parseMs(process.env.CC_TASK_STOP_COMPLETE_WAIT_MS, 1500);
@@ -27,7 +29,8 @@ function readJsonStdin() {
   }
   if (!raw.trim()) return {};
   try {
-    return JSON.parse(raw);
+    const data = JSON.parse(raw);
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
   } catch {
     return {};
   }
@@ -35,7 +38,28 @@ function readJsonStdin() {
 
 function dbPath() {
   if (process.env.CC_DB_PATH) return process.env.CC_DB_PATH;
-  return path.join(__dirname, '..', '..', 'data', 'tasks.db');
+  return path.join(paths.DATA_DIR, 'tasks.db');
+}
+
+// Only fixed labels, booleans, and hashed identifiers reach diagnostics.
+// An invocation record for UserPromptSubmit without a later Stop invocation
+// distinguishes missing delivery from a Stop that ran but could not update.
+function diagnostic(outcome, details = {}) {
+  const fingerprint = value => value ? crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 16) : null;
+  const event = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PermissionRequest', 'Stop'].includes(process.argv[2])
+    ? process.argv[2] : 'other';
+  const line = JSON.stringify({ timestamp: now(), event, outcome,
+    task: fingerprint(process.env.CC_TASK_ID), ...details }) + '\n';
+  try {
+    fs.mkdirSync(paths.LOG_DIR, { recursive: true, mode: 0o700 });
+    const file = path.join(paths.LOG_DIR, 'codex-hooks.jsonl');
+    if (fs.existsSync(file) && fs.statSync(file).size > 1024 * 1024) {
+      fs.renameSync(file, file + '.1');
+    }
+    fs.appendFileSync(file, line, { mode: 0o600 });
+  } catch {
+    try { process.stderr.write(line); } catch {}
+  }
 }
 
 function pickSessionId(data) {
@@ -91,14 +115,17 @@ function transcriptTurnComplete(transcriptPath) {
     }
     const payload = entry.payload || {};
     const type = payload.type || entry.type;
-    if (type === 'task_started') {
+    if (['task_started', 'turn_aborted', 'task_interrupted', 'user_message', 'function_call', 'function_call_output', 'custom_tool_call', 'custom_tool_call_output'].includes(type) ||
+        (type === 'message' && payload.role === 'user')) {
       complete = false;
-    } else if (type === 'context_compacted' || entry.type === 'compacted') {
+    } else if (type === 'context_compacted' || type === 'compacted' || entry.type === 'compacted') {
       complete = false;
     } else if (type === 'task_complete') {
       complete = true;
-    } else if ((type === 'agent_message' || type === 'message') && payload.phase === 'final_answer') {
+    } else if ((type === 'agent_message' || type === 'message') && payload.phase === 'final_answer' && (type === 'agent_message' || payload.role === 'assistant')) {
       complete = true;
+    } else if (type === 'agent_message' || type === 'message' || type === 'agent_reasoning' || type === 'reasoning') {
+      complete = false;
     }
   }
   return complete;
@@ -148,8 +175,13 @@ function main() {
   const event = process.argv[2] || '';
   const data = readJsonStdin();
   const taskId = process.env.CC_TASK_ID;
+  diagnostic('invoked', { hasTask: !!taskId, hasSession: !!pickSessionId(data) });
+  if (!taskId && event !== 'SessionStart') {
+    diagnostic('missing_task');
+    return 0;
+  }
   const file = dbPath();
-  if (!fs.existsSync(file)) return 0;
+  if (!fs.existsSync(file)) { diagnostic('database_update_failure', { reason: 'database_missing' }); return 0; }
 
   const db = new Database(file);
   const ts = now();
@@ -161,6 +193,7 @@ function main() {
       const cwd = pickCwd(data);
       const kind = process.env.CC_SESSION_KIND || null;
       const parentSessionId = process.env.CC_PARENT_SESSION_ID || null;
+      if (!sessionId) diagnostic('missing_session');
       if (sessionId) {
         db.prepare(`
           INSERT INTO sessions (session_id, task_id, kind, parent_session_id, transcript_path, cwd, source, started_at)
@@ -199,8 +232,30 @@ function main() {
     } else if (event === 'PermissionRequest') {
       setActivity(db, taskId, 'idle', ts);
     } else if (event === 'Stop') {
-      const transcriptPath = taskTranscriptPath(db, taskId, data);
-      if (waitForTurnComplete(transcriptPath)) setActivity(db, taskId, 'idle', ts);
+      const task = db.prepare('SELECT session_id, activity, updated_at FROM tasks WHERE id = ? AND archived = 0').get(taskId);
+      if (!task) { diagnostic('missing_task'); return 0; }
+      if (!pickSessionId(data) && !task.session_id) diagnostic('missing_session');
+      if (pickSessionId(data) && task.session_id && pickSessionId(data) !== task.session_id) {
+        diagnostic('completion_not_detected', { reason: 'session_mismatch' });
+        return 0;
+      }
+      // Stop's message is authoritative; do not inspect its contents or require
+      // rollout flushing. stop_hook_active describes a *past* continuation,
+      // not whether this newly finished turn will continue again.
+      const hasMessage = Object.hasOwn(data, 'last_assistant_message') && data.last_assistant_message !== null;
+      const source = hasMessage ? 'stop_payload' : 'transcript';
+      const complete = data.hook_event_name && data.hook_event_name !== 'Stop' ? false
+        : hasMessage ? typeof data.last_assistant_message === 'string' && !!data.last_assistant_message.trim()
+          : waitForTurnComplete(taskTranscriptPath(db, taskId, data));
+      diagnostic(complete ? 'completion_detected' : 'completion_not_detected', { source });
+      if (complete) {
+        // Preserve workflow waits and avoid overwriting a newer prompt/tool
+        // event that arrived while the legacy transcript fallback was waiting.
+        const result = db.prepare(`UPDATE tasks SET activity = 'idle', updated_at = ?
+          WHERE id = ? AND archived = 0 AND activity IN ('working', 'idle') AND updated_at = ?`)
+          .run(now(), taskId, task.updated_at);
+        diagnostic(result.changes ? 'activity_idle' : 'update_skipped', { reason: result.changes ? 'updated' : 'state_changed_or_workflow' });
+      }
     }
     return 0;
   } finally {
@@ -209,10 +264,12 @@ function main() {
 }
 
 try {
-  process.exit(main() || 0);
-} catch (err) {
-  try {
-    process.stderr.write(`dashboard codex hook error: ${err && err.message ? err.message : String(err)}\n`);
-  } catch {}
-  process.exit(0);
+  main();
+} catch {
+  // Database errors can contain paths or SQL values; never log raw errors.
+  diagnostic('database_update_failure');
+} finally {
+  // Neutral JSON allows stopping without blocking another hook's continuation.
+  if (process.argv[2] === 'Stop') process.stdout.write('{}\n');
+  process.exitCode = 0;
 }
