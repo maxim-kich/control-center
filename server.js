@@ -32,7 +32,7 @@ const db = require('./lib/db');
 const codex = require('./lib/codex');
 const { GraphifyManager, graphifyProjectInfo } = require('./lib/graphify');
 const { autoCommitTaskProject } = require('./lib/gitAutoCommit');
-const { hasProjectGit, projectGitApiFields } = require('./lib/gitRoots');
+const { hasProjectGit, projectGitApiFields, clearProjectGitCache } = require('./lib/gitRoots');
 const { buildHookArgs } = require('./lib/hooksSettings');
 const { ensureSpawnHelper } = require('./lib/ensurePty');
 const updater = require('./lib/core/updater');
@@ -41,7 +41,7 @@ const { ExtensionPlatform } = require('./lib/core/extensionPlatform');
 const migrationWelcome = require('./lib/core/migrationWelcome');
 const skills = require('./lib/skills');
 const { discoverModelProviders, normalizeActiveProvider } = require('./lib/modelProviders');
-const { getProvider } = require('./lib/providers');
+const { getProvider, listProviders } = require('./lib/providers');
 const { SessionManager } = require('./lib/sessionRunner');
 
 // Self-heal node-pty's spawn-helper +x bit (survives `npm install --ignore-scripts`).
@@ -111,6 +111,9 @@ const jsonParser = express.json({ limit: '2mb' });
 const extensionUploadJsonParser = express.json({ limit: '30mb' });
 app.use((req, res, next) => {
   res.setHeader('X-Control-Center-Boot-Id', BOOT_ID);
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    res.on('finish', clearProjectGitCache);
+  }
   next();
 });
 app.use((req, res, next) => {
@@ -367,7 +370,10 @@ function withChildren(tasks) {
   });
 }
 
-app.get('/api/health', (req, res) => {
+app.get(['/api/health', '/api/bootstrap'], (req, res) => {
+  // Page restoration needs configuration, never blocking CLI diagnostics.
+  // Keep the existing health contract for launchers and diagnostic consumers.
+  const bootstrap = req.path === '/api/bootstrap';
   let nodePtyOk = true;
   try {
     require('node-pty');
@@ -381,8 +387,23 @@ app.get('/api/health', (req, res) => {
     appVersion: PACKAGE.version,
     appHome: paths.APP_HOME,
     codexBin: codex.CODEX_BIN,
-    codexVersion: codex.codexVersion(),
-    codexAuthConfigured: codex.codexAuthConfigured(),
+    ...(!bootstrap ? {
+      codexVersion: codex.codexVersion(),
+      codexAuthConfigured: codex.codexAuthConfigured(),
+    } : {
+      modelConfiguration: {
+        activeProvider: activeModelProvider(),
+        providers: listProviders().map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          active: provider.id === activeModelProvider(),
+          models: provider.models(),
+          modes: provider.modes(),
+          defaultModel: provider.defaultModel(),
+          supports: provider.supports,
+        })),
+      },
+    }),
     activeModelProvider: activeModelProvider(),
     dbPath: db.DB_PATH,
     backupPath: db.DB_BACKUP_DIR,

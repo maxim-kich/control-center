@@ -573,9 +573,9 @@ function configureExtensionRuntimeHost() {
   });
 }
 
-async function refresh(force) {
+async function refresh(force, initialTasks) {
   try {
-    const data = await api.get('/api/tasks');
+    const data = initialTasks || await api.get('/api/tasks');
     TASKS = data;
     rebuildIndex();
     notifier.scan(TASKS);
@@ -3397,12 +3397,12 @@ async function loadProjects() {
 
 /* ---------------------------------------------------------------- health */
 
-// No health indicator in the top nav anymore — we still read /api/health to pick up the YOLO
-// default for new tasks and the workspace root for path display.
+// Restore configuration without running CLI authentication/version diagnostics.
 async function loadHealth() {
   try {
-    const hd = await api.get('/api/health');
+    const hd = await api.get('/api/bootstrap');
     currentBootId = hd.bootId || currentBootId;
+    if (hd.modelConfiguration) MODEL_CONNECTIONS = hd.modelConfiguration;
     healthYoloDefault = !!hd.skipPermissions;
     ultracodeEnabled = !!hd.ultracodeEnabled;
     if (hd.workspaceRoot) workspaceRoot = hd.workspaceRoot;
@@ -3761,14 +3761,13 @@ async function init() {
   notifier.init();
   await loadHealth();
   restoreUiStateForBoot();
-  restoreLoadingStep('Loading extensions...');
-  await loadExtensions({ quiet: true });
-  restoreLoadingStep('Loading projects...');
-  await loadProjects();
-  if (archivesAreVisible()) {
-    restoreLoadingStep('Loading archived tasks...');
-    await loadArchived();
-  }
+  restoreLoadingStep('Loading workspace...');
+  const [, , initialTasks] = await Promise.all([
+    loadExtensions({ quiet: true }),
+    loadProjects(),
+    api.get('/api/tasks'),
+    archivesAreVisible() ? loadArchived() : Promise.resolve(),
+  ]);
   syncArchiveToggles();
   try {
     const saved = safeJsonParse(sessionStorage.getItem(UI_STATE_KEY));
@@ -3776,24 +3775,26 @@ async function init() {
   } catch {
     /* storage unavailable — best-effort */
   }
-  setPage(currentPage);
   restoreLoadingStep('Loading tasks...');
-  await refresh(true);
+  await refresh(true, initialTasks);
+  setPage(currentPage);
   restoreLoadingStep('Workspace restored');
   persistUiState();
-  setTimeout(hideRestoreLoading, 260);
+  hideRestoreLoading();
   setTimeout(() => loadMigrationWelcome(false), 420);
-  loadModelConnections();
 }
 
+let startupComplete = false;
 init().catch((e) => {
   hideRestoreLoading();
   toast('Startup failed: ' + e.message, { err: true });
-  loadModelConnections();
   loadProjects();
   refresh(true);
+}).finally(() => {
+  startupComplete = true;
 });
 setInterval(() => {
+  if (!startupComplete) return;
   if ($('#taskModal').hidden && $('#detailsModal').hidden && $('#mediaModal').hidden && $('#skillInstallModal').hidden && $('#extensionInstallModal').hidden && $('#extensionModal').hidden) refresh();
   else tabs.sync();
   if (currentPage === 'projects' && !shouldDeferBoardRender()) loadProjects();
