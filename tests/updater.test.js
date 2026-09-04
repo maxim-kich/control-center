@@ -97,7 +97,7 @@ test('overwriteImageOwnedChanges dry run reports changes without modifying files
   assert.equal(fs.readFileSync(path.join(repo, 'server.js'), 'utf8'), "console.log('changed');\n");
 });
 
-test('backupInstance copies config and checkpointed database', () => {
+test('backupInstance snapshots committed WAL data without breaking live connection locks', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-updater-backup-'));
   const home = path.join(tmp, 'home');
   const data = path.join(home, 'data');
@@ -106,8 +106,9 @@ test('backupInstance copies config and checkpointed database', () => {
   fs.writeFileSync(path.join(home, 'config.yaml'), 'update_channel: stable\n');
   const dbPath = path.join(data, 'tasks.db');
   const db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('wal_autocheckpoint = 0');
   db.exec('CREATE TABLE sample (id TEXT PRIMARY KEY); INSERT INTO sample (id) VALUES (\'one\');');
-  db.close();
 
   try {
     const backup = updater.backupInstance({ appHome: home, dbPath, backupDir: backups, label: 'test' });
@@ -117,10 +118,28 @@ test('backupInstance copies config and checkpointed database', () => {
     const copied = new Database(path.join(backup.path, 'tasks.db'), { readonly: true });
     try {
       assert.equal(copied.prepare('SELECT id FROM sample').get().id, 'one');
+      assert.equal(copied.pragma('integrity_check', { simple: true }), 'ok');
     } finally {
       copied.close();
     }
+    // Hooks write through short-lived connections in separate processes. The
+    // server's existing connection must see every commit after a backup.
+    for (const value of ['two', 'three']) {
+      const child = spawnSync(process.execPath, ['-e', `
+        const Database = require('better-sqlite3');
+        const db = new Database(process.argv[1]);
+        db.prepare('UPDATE sample SET id = ?').run(process.argv[2]);
+        db.close();
+      `, dbPath, value], { cwd: ROOT, encoding: 'utf8' });
+      assert.equal(child.status, 0, child.stderr);
+      assert.equal(db.prepare('SELECT id FROM sample').get().id, value);
+    }
+    assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
+    const snapshot = new Database(path.join(backup.path, 'tasks.db'), { readonly: true });
+    try { assert.equal(snapshot.prepare('SELECT id FROM sample').get().id, 'one'); }
+    finally { snapshot.close(); }
   } finally {
+    db.close();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
