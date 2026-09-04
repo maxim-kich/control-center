@@ -91,7 +91,7 @@ test('startup fetches concurrently but restores tasks and tabs after projects an
   };
   const context = {
     showRestoreLoading() {}, enhanceCustomSelect() {}, $() {}, notifier: { init() {} },
-    async loadHealth() {}, restoreUiStateForBoot() {}, restoreLoadingStep() {},
+    async loadHealth() {}, async loadModelCatalog() {}, restoreUiStateForBoot() {}, restoreLoadingStep() {},
     loadExtensions: () => pending('extensions'), loadProjects: () => pending('projects'),
     api: { get: () => pending('tasks') }, archivesAreVisible: () => true,
     loadArchived: () => pending('archive'), syncArchiveToggles() {},

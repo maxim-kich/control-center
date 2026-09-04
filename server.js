@@ -42,6 +42,10 @@ const migrationWelcome = require('./lib/core/migrationWelcome');
 const skills = require('./lib/skills');
 const { discoverModelProviders, normalizeActiveProvider } = require('./lib/modelProviders');
 const { getProvider, listProviders } = require('./lib/providers');
+const { catalog: modelCatalog } = require('./lib/modelCatalog');
+modelCatalog.configure({ codex: codex.CODEX_BIN, claude: getProvider('claude').bin }, {
+  codex: codex.buildEnv, claude: getProvider('claude').buildEnv,
+});
 const { SessionManager } = require('./lib/sessionRunner');
 
 // Self-heal node-pty's spawn-helper +x bit (survives `npm install --ignore-scripts`).
@@ -401,7 +405,7 @@ app.get(['/api/health', '/api/bootstrap'], (req, res) => {
           id: provider.id,
           name: provider.name,
           active: provider.id === activeModelProvider(),
-          models: provider.models(),
+          ...modelCatalog.snapshot(provider.id),
           modes: provider.modes(),
           defaultModel: provider.defaultModel(),
           supports: provider.supports,
@@ -769,6 +773,16 @@ app.patch('/api/settings/general', (req, res) => {
     setMetaBool(CAFFEINATE_ENABLED_KEY, parseSettingBool(body.caffeinate_enabled, true));
   }
   res.json(generalSettingsPayload());
+});
+
+// Fast catalog reads never run CLI diagnostics.
+app.get('/api/models', (req, res) => {
+  res.json({ providers: listProviders().map((p) => ({ id: p.id, ...modelCatalog.snapshot(p.id) })) });
+});
+
+app.post('/api/models/refresh', async (req, res) => {
+  await modelCatalog.refreshAll({ force: true });
+  res.json({ providers: listProviders().map((p) => ({ id: p.id, ...modelCatalog.snapshot(p.id) })) });
 });
 
 app.get('/api/connections/models', (req, res) => {
@@ -1236,9 +1250,13 @@ app.get('/api/tasks', (req, res) => {
 });
 
 const FALLBACK_MODES = ['build', 'plan'];
-const EFFORTS = ['low', 'medium', 'high', 'xhigh'];
-const MODEL_RE = /^[A-Za-z0-9._:-]+$/;
+const EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,255}$/;
 const validModel = (m) => typeof m === 'string' && MODEL_RE.test(m.trim());
+function validEffort(provider, model, effort) {
+  const supported = modelCatalog.snapshot(provider).models.find((m) => m.id === model)?.efforts;
+  return supported?.length ? supported.includes(effort) : EFFORTS.includes(effort);
+}
 
 function launchProvider(task) {
   return getProvider((task && task.provider) || 'codex');
@@ -1267,9 +1285,13 @@ app.post('/api/tasks', (req, res) => {
   const providerId = activeModelProvider();
   const provider = getProvider(providerId);
   const mode = modesForProvider(providerId).includes(b.mode) ? b.mode : 'build';
+  const model = validModel(b.model) ? String(b.model).trim() : provider.defaultModel();
+  const modelInfo = provider.models().find((m) => m.id === model);
+  const effort = b.effort ?? modelInfo?.defaultEffort ?? modelInfo?.efforts?.[0] ?? 'medium';
+  if (!validEffort(providerId, model, effort)) return res.status(400).json({ error: 'invalid effort' });
   const normalized = provider.normalizeTaskSettings({
-    model: validModel(b.model) ? String(b.model).trim() : provider.defaultModel(),
-    effort: b.effort === 'max' ? 'xhigh' : EFFORTS.includes(b.effort) ? b.effort : undefined,
+    model,
+    effort,
     mode,
     yolo: mode === 'build' && (b.yolo == null ? YOLO : !!b.yolo),
     ultracode: provider.supports.ultracode && !!b.ultracode,
@@ -1309,8 +1331,7 @@ app.patch('/api/tasks/:id', (req, res) => {
   }
   const provider = launchProvider(task);
   if ('mode' in patch && !modesForProvider(provider.id).includes(patch.mode)) return res.status(400).json({ error: 'invalid mode' });
-  if ('effort' in patch && patch.effort === 'max') patch.effort = 'xhigh';
-  if ('effort' in patch && !EFFORTS.includes(patch.effort)) return res.status(400).json({ error: 'invalid effort' });
+  if ('effort' in patch && patch.effort !== task.effort && !validEffort(provider.id, patch.model || task.model, patch.effort)) return res.status(400).json({ error: 'invalid effort' });
   if ('model' in patch) {
     if (!validModel(patch.model)) return res.status(400).json({ error: 'invalid model' });
     patch.model = String(patch.model).trim();
@@ -1796,6 +1817,7 @@ async function shutdown(reason = 'shutdown') {
   if (shuttingDown) return;
   shuttingDown = true;
   clearInterval(heartbeat);
+  modelCatalog.stop();
   const wsCode = reason === 'restart' ? 1012 : 1001;
   const wsReason = reason === 'restart' ? 'Server restarting' : 'Server shutting down';
   for (const ws of wss.clients) {
@@ -1851,6 +1873,7 @@ async function startServer() {
   await bootstrapBundledIntegrations();
   server.listen(PORT, HOST, async () => {
   syncCaffeinate();
+  modelCatalog.start();
   scheduleUpdateCheck();
   const extensionStartup = await extensionManager.notify('app.started', {
     bootId: BOOT_ID,

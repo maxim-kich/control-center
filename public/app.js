@@ -114,20 +114,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 const EFFORT_LABELS = ['Low', 'Medium', 'High', 'X-High'];
-const MODEL_LABELS = {
-  'gpt-5.6-sol': 'GPT-5.6 Sol',
-  'gpt-5.6-terra': 'GPT-5.6 Terra',
-  'gpt-5.6-luna': 'GPT-5.6 Luna',
-  'gpt-5.5': 'GPT-5.5',
-  'gpt-5.4': 'GPT-5.4',
-  'gpt-5.4-mini': 'GPT-5.4 mini',
-  'gpt-5.3-codex-spark': 'GPT-5.3 Codex Spark',
-  'claude-opus-4-8': 'Opus 4.8',
-  'claude-sonnet-4-6': 'Sonnet 4.6',
-  'claude-haiku-4-5-20251001': 'Haiku 4.5',
-};
+const MODEL_LABELS = {};
 const modelLabel = (m) => MODEL_LABELS[m] || m || '—';
-const effortLabel = (e) => EFFORT_LABELS[EFFORTS.indexOf(e)] || e || '—';
+const effortLabel = (e) => EFFORT_LABELS[EFFORTS.indexOf(e)] || (e ? e.charAt(0).toUpperCase() + e.slice(1) : '—');
 const STATUS_LABELS = { waiting: 'Waiting for go', running: 'Running', needs_attention: 'Needs attention', done: 'Done' };
 const SUBTASK_LABELS = { pending: 'Pending', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled', removed: 'Removed' };
 const GRAPHIFY_LABELS = {
@@ -1085,13 +1074,48 @@ async function loadArchived() {
 
 let projectValue = '';
 let taskUploads = []; // [{ name, path, ext }]
+let taskProviderId = 'codex';
+let taskEfforts = EFFORTS.slice();
+
+function taskEffortValue() {
+  return taskEfforts[+$('#f_effort').value] || 'medium';
+}
+
+function syncTaskModelOptions(provider, selected) {
+  const models = [...(provider.models || [])];
+  if (selected && !models.some((m) => m.id === selected)) models.push({ id: selected, label: modelLabel(selected) + ' (saved)' });
+  if (!models.length) models.push({ id: '', label: 'Provider default' });
+  const select = $('#f_model');
+  select.replaceChildren(...models.map((m) => h('option', { value: m.id, title: m.description || '' }, m.label || modelLabel(m.id))));
+  select.value = selected || provider.defaultModel || models[0].id;
+  if (!select.value) select.value = models[0].id;
+  syncCustomSelect(select);
+}
+
+function syncTaskEffortControls(preferred, preserve = false) {
+  const provider = (MODEL_CONNECTIONS.providers || []).find((p) => p.id === taskProviderId);
+  const model = provider?.models?.find((m) => m.id === $('#f_model').value);
+  const supported = model?.efforts;
+  taskEfforts = Array.isArray(supported) ? [...supported] : EFFORTS.slice();
+  const disabled = Array.isArray(supported) && !supported.length;
+  if (preserve && preferred && !taskEfforts.includes(preferred)) taskEfforts.push(preferred);
+  if (!taskEfforts.length) taskEfforts = [preferred || 'medium'];
+  const selected = taskEfforts.includes(preferred) ? preferred
+    : taskEfforts.includes(model?.defaultEffort) ? model.defaultEffort
+      : taskEfforts.includes('medium') ? 'medium' : taskEfforts[0];
+  const input = $('#f_effort');
+  input.max = String(taskEfforts.length - 1);
+  input.disabled = disabled;
+  input.value = String(taskEfforts.indexOf(selected));
+  $('#effortLabel').textContent = disabled ? 'Default' : effortLabel(selected);
+}
 
 function activeProviderInfo() {
   return (MODEL_CONNECTIONS.providers || []).find((p) => p.active) || (MODEL_CONNECTIONS.providers || [])[0] || {
     id: 'codex',
     name: 'Codex',
-    defaultModel: 'gpt-5.6-sol',
-    models: Object.entries(MODEL_LABELS).filter(([id]) => id.startsWith('gpt-')).map(([id, label]) => ({ id, label })),
+    defaultModel: '',
+    models: [{ id: '', label: 'Provider default' }],
     modes: ['build', 'plan'],
     supports: { ultracode: false },
   };
@@ -1101,12 +1125,8 @@ function syncTaskProviderControls(task) {
   const provider = task && task.provider
     ? (MODEL_CONNECTIONS.providers || []).find((p) => p.id === task.provider) || activeProviderInfo()
     : activeProviderInfo();
-  const models = provider.models && provider.models.length ? provider.models : [{ id: provider.defaultModel || 'gpt-5.6-sol', label: modelLabel(provider.defaultModel || 'gpt-5.6-sol') }];
-  const select = $('#f_model');
-  select.replaceChildren(...models.map((m) => h('option', { value: m.id }, m.label || modelLabel(m.id))));
-  select.value = task ? task.model : provider.defaultModel || models[0].id;
-  if (!select.value && models[0]) select.value = models[0].id;
-  syncCustomSelect(select);
+  taskProviderId = provider.id;
+  syncTaskModelOptions(provider, task ? task.model : provider.defaultModel);
 
   const modes = provider.modes && provider.modes.length ? provider.modes : ['build', 'plan'];
   for (const card of document.querySelectorAll('.mode-card')) {
@@ -1143,10 +1163,7 @@ function openTaskModal(task, opts) {
   $('#f_title').value = task ? task.title : '';
   $('#f_description').value = task ? task.description : '';
   syncTaskProviderControls(task);
-  const taskEffort = task && task.effort === 'max' ? 'xhigh' : task && task.effort;
-  const eIdx = task ? EFFORTS.indexOf(taskEffort) : 1;
-  $('#f_effort').value = eIdx >= 0 ? eIdx : 1;
-  $('#effortLabel').textContent = EFFORT_LABELS[+$('#f_effort').value];
+  syncTaskEffortControls(task?.effort, !!task);
   $('#f_yolo').checked = task ? !!task.yolo : healthYoloDefault;
   refreshModeUi();
 
@@ -1166,7 +1183,7 @@ function openTaskModal(task, opts) {
 }
 
 $('#f_effort').addEventListener('input', () => {
-  $('#effortLabel').textContent = EFFORT_LABELS[+$('#f_effort').value];
+  $('#effortLabel').textContent = effortLabel(taskEffortValue());
 });
 
 // Grey YOLO when Plan mode overrides it.
@@ -1181,7 +1198,7 @@ function refreshModeUi() {
     yoloLabel.title = overridden ? 'This mode sets its own permission behavior.' : 'Bypass approvals and sandbox where the active provider supports it.';
   }
 }
-$('#f_model').addEventListener('change', refreshModeUi);
+$('#f_model').addEventListener('change', () => { syncTaskEffortControls(taskEffortValue()); refreshModeUi(); });
 for (const r of document.querySelectorAll('input[name="f_mode"]')) r.addEventListener('change', refreshModeUi);
 
 $('#taskForm').addEventListener('submit', async (ev) => {
@@ -1199,7 +1216,7 @@ $('#taskForm').addEventListener('submit', async (ev) => {
     project_path: project,
     description,
     model: $('#f_model').value,
-    effort: EFFORTS[+$('#f_effort').value] || 'medium',
+    effort: taskEffortValue(),
     mode,
     yolo: mode === 'build' && $('#f_yolo').checked,
     ultracode: !$('#f_ultracode').closest('.checkbox').hidden && $('#f_ultracode').checked,
@@ -2130,7 +2147,7 @@ $('#appHomeLink').addEventListener('click', (ev) => {
   ev.preventDefault();
   setPage('dashboard');
 });
-$('#refreshModelsBtn').addEventListener('click', loadModelConnections);
+$('#refreshModelsBtn').addEventListener('click', () => loadModelCatalog(true));
 $('#createSkillBtn').addEventListener('click', startSkillCreate);
 $('#installSkillBtn').addEventListener('click', openSkillInstallModal);
 $('#skillInstallForm').addEventListener('submit', submitSkillInstall);
@@ -3209,6 +3226,13 @@ function renderModelProvider(provider) {
             h('span', { class: 'model-field-label' }, 'Launch'),
             h('span', { class: 'model-field-value' }, provider.launchSupported ? 'supported' : 'not wired'),
           ),
+          h('div', { class: 'model-field' },
+            h('span', { class: 'model-field-label' }, 'Models'),
+            h('span', { class: 'model-field-value', title: provider.modelCatalog?.error || '' },
+              `${(provider.models || []).length} · ` + (provider.modelCatalog?.updatedAt
+                ? `Updated ${new Date(provider.modelCatalog.updatedAt).toLocaleString()}${provider.modelCatalog.stale ? ' · stale' : ''}`
+                : 'Fallback list') + (provider.modelCatalog?.error ? ' · refresh unavailable' : '')),
+          ),
         ),
       ),
     ),
@@ -3258,6 +3282,7 @@ function updateSettingsAttention() {
 async function loadModelConnections() {
   try {
     MODEL_CONNECTIONS = await api.get('/api/connections/models');
+    applyModelCatalog(MODEL_CONNECTIONS);
     renderModelsSection();
     renderSkillsSection();
     updateSettingsAttention();
@@ -3266,6 +3291,44 @@ async function loadModelConnections() {
     if (summary) summary.textContent = 'Model check failed';
     const grid = $('#modelProviderGrid');
     if (grid) grid.replaceChildren(h('div', { class: 'project-empty' }, e.message));
+  }
+}
+
+function applyModelCatalog(data) {
+  for (const update of data.providers || []) {
+    const provider = (MODEL_CONNECTIONS.providers || []).find((p) => p.id === update.id);
+    if (provider) Object.assign(provider, { models: update.models, defaultModel: update.defaultModel, modelCatalog: update.modelCatalog });
+    for (const model of update.models || []) MODEL_LABELS[model.id] = model.label;
+  }
+  if (!$('#taskModal').hidden) {
+    const provider = (MODEL_CONNECTIONS.providers || []).find((p) => p.id === taskProviderId);
+    if (provider) {
+      const effort = taskEffortValue();
+      syncTaskModelOptions(provider, $('#f_model').value);
+      syncTaskEffortControls(effort, true);
+    }
+  }
+}
+
+let modelRefreshPending = false;
+async function loadModelCatalog(force = false) {
+  if (modelRefreshPending) return;
+  modelRefreshPending = true;
+  const button = $('#refreshModelsBtn');
+  if (force) { button.disabled = true; button.textContent = 'Refreshing…'; }
+  try {
+    const data = force ? await api.send('POST', '/api/models/refresh') : await api.get('/api/models');
+    applyModelCatalog(data);
+    if (currentSettingsSection === 'models') renderModelsSection();
+    if (force) {
+      const failed = (data.providers || []).filter((p) => p.modelCatalog?.error);
+      toast(failed.length ? `Models refreshed with ${failed.length} provider check(s) unavailable; saved lists retained.` : 'Models refreshed');
+    }
+  } catch (error) {
+    if (force) toast('Model refresh failed: ' + error.message, { err: true });
+  } finally {
+    modelRefreshPending = false;
+    if (force) { button.disabled = false; button.textContent = 'Refresh models'; }
   }
 }
 
@@ -3446,7 +3509,7 @@ async function loadHealth() {
   try {
     const hd = await api.get('/api/bootstrap');
     currentBootId = hd.bootId || currentBootId;
-    if (hd.modelConfiguration) MODEL_CONNECTIONS = hd.modelConfiguration;
+    if (hd.modelConfiguration) { MODEL_CONNECTIONS = hd.modelConfiguration; applyModelCatalog(hd.modelConfiguration); }
     healthYoloDefault = !!hd.skipPermissions;
     ultracodeEnabled = !!hd.ultracodeEnabled;
     if (hd.workspaceRoot) workspaceRoot = hd.workspaceRoot;
@@ -3826,6 +3889,7 @@ async function init() {
   persistUiState();
   hideRestoreLoading();
   setTimeout(() => loadMigrationWelcome(false), 420);
+  void loadModelCatalog();
 }
 
 let startupComplete = false;
@@ -3843,3 +3907,5 @@ setInterval(() => {
   else tabs.sync();
   if (currentPage === 'projects' && !shouldDeferBoardRender()) loadProjects();
 }, 2500);
+
+setInterval(() => { if (startupComplete && !document.hidden) void loadModelCatalog(); }, 30000);

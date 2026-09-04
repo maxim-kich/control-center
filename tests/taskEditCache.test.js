@@ -40,6 +40,8 @@ function harness() {
       $('#f_ultracode').checked = !!task.ultracode;
       mode.value = task.mode;
     },
+    syncTaskEffortControls(effort) { $('#f_effort').value = Math.max(0, context.EFFORTS.indexOf(effort || 'medium')); },
+    taskEffortValue() { return context.EFFORTS[+$('#f_effort').value] || 'medium'; },
     refreshModeUi() {}, setProjectLabel() {}, renderUploadList() {}, loadProjects() {},
     show() {}, hide() {}, setTimeout() {}, toast(message) { assert.fail(message); },
   };
