@@ -35,6 +35,15 @@ test('boards keep equal tracks and independently scroll each column', () => {
   assert.match(css, /\.card-desc\s*\{[\s\S]*?-webkit-line-clamp:\s*3;/);
 });
 
+test('boards render persisted order and expose exact-position drag targets', () => {
+  assert.match(app, /columnSortValue\(a\) - columnSortValue\(b\)/);
+  assert.match(app, /function dropBeforeCard\(body, clientY, draggingId\)/);
+  assert.match(app, /before_id: beforeId/);
+  assert.match(server, /app\.post\('\/api\/tasks\/:id\/move'/);
+  assert.match(css, /\.card\.drop-before::before/);
+  assert.match(css, /\.col-body\.drop-at-end::after/);
+});
+
 test('terminal detail keeps only project identity metadata', () => {
   assert.match(html, /id="tdProject"/);
   assert.match(html, /id="tdPath"/);

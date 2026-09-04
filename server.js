@@ -1332,6 +1332,39 @@ app.patch('/api/tasks/:id', (req, res) => {
   res.json(updated);
 });
 
+app.post('/api/tasks/:id/move', (req, res) => {
+  const task = db.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'not found' });
+  const body = req.body || {};
+  const status = body.status || task.status;
+  if (!['backlog', 'in_progress', 'done'].includes(status)) {
+    return res.status(400).json({ error: 'invalid status' });
+  }
+  if (status === 'in_progress' && task.status !== status) {
+    return res.status(409).json({ error: 'use start or resume when moving a task into In Progress' });
+  }
+  if (status === 'done' && task.status !== status) {
+    return res.status(409).json({ error: 'use done when moving a task into Done' });
+  }
+  const beforeId = body.before_id == null ? null : String(body.before_id);
+  try {
+    const updated = db.moveTask(task.id, status, beforeId);
+    if (status !== task.status) {
+      return extensionManager.notify('task.statusChanged', extensionEventContext({
+        task: updated,
+        previous: task,
+        patch: { status, col_order: updated.col_order },
+      })).then(() => res.json(updated));
+    }
+    return res.json(updated);
+  } catch (error) {
+    if (error && error.code === 'TASK_MOVE_TARGET_INVALID') {
+      return res.status(409).json({ error: error.message });
+    }
+    throw error;
+  }
+});
+
 app.post('/api/tasks/:id/archive', (req, res) => {
   const task = db.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'not found' });
@@ -1379,10 +1412,11 @@ function taskCommitScope(task) {
   }
 }
 
-async function completeTask(taskId) {
+async function completeTask(taskId, beforeId = null) {
   const task = db.getTask(taskId);
   if (!task) return null;
-  const updated = db.updateTask(taskId, { status: 'done', ended_at: db.now(), activity: null, wake_at: null });
+  db.moveTask(taskId, 'done', beforeId);
+  const updated = db.updateTask(taskId, { ended_at: db.now(), activity: null, wake_at: null });
   if (task.session_id) db.endSession(task.session_id);
   manager.stop(taskId);
   pending.delete(taskId);
@@ -1436,7 +1470,8 @@ async function completeTask(taskId) {
 app.post('/api/tasks/:id/done', (req, res) => {
   const task = db.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'not found' });
-  return completeTask(req.params.id).then((updated) => res.json(updated));
+  const beforeId = req.body && req.body.before_id != null ? String(req.body.before_id) : null;
+  return completeTask(req.params.id, beforeId).then((updated) => res.json(updated));
 });
 
 // Archived tasks (hidden from the main board) — for the "Archived" filter view.
@@ -1458,8 +1493,8 @@ app.post('/api/tasks/:id/start', (req, res) => {
     return res.status(400).json({ error: `project path does not exist: ${cwd}` });
   }
   const openingPrompt = provider.taskOpeningPrompt(task);
+  db.moveTask(task.id, 'in_progress', req.body && req.body.before_id != null ? String(req.body.before_id) : null);
   db.updateTask(task.id, {
-    status: 'in_progress',
     started_at: task.started_at || db.now(),
     ended_at: null,
     activity: openingPrompt.trim() ? 'working' : 'idle',
@@ -1473,8 +1508,9 @@ app.post('/api/tasks/:id/resume', (req, res) => {
   if (!task) return res.status(404).json({ error: 'not found' });
   if (rejectUnsupportedLaunch(res, task)) return;
   if (!task.session_id) return res.status(400).json({ error: 'no session to resume — use start' });
+  db.moveTask(task.id, 'in_progress', req.body && req.body.before_id != null ? String(req.body.before_id) : null);
   if (!manager.isLive(task.id)) pending.set(task.id, { kind: 'resume', sessionId: task.session_id });
-  db.updateTask(task.id, { status: 'in_progress', ended_at: null });
+  db.updateTask(task.id, { ended_at: null });
   res.json({ sessionId: task.session_id });
 });
 

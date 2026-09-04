@@ -728,7 +728,8 @@ window.addEventListener('blur', () => {
 });
 
 function columnSortValue(t) {
-  return Date.parse(t.column_changed_at || t.created_at || t.updated_at || '') || 0;
+  const order = Number(t.col_order);
+  return Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER;
 }
 
 function cardRenderSignature(t) {
@@ -785,8 +786,16 @@ function gitCommitNotice(updated) {
   return '';
 }
 
-async function completeTaskAndClose(id, { message } = {}) {
-  const updated = await markTaskDone(id);
+async function completeTaskAndClose(id, { message, beforeId = null } = {}) {
+  const updated = await api.send('POST', `/api/tasks/${id}/done`, { before_id: beforeId });
+  const task = byId.get(id);
+  if (task) {
+    Object.assign(task, updated, { live: false, activity: null, displayStatus: 'done' });
+    rebuildIndex();
+    renderBoard();
+    tabs.sync();
+    notifier.scan(TASKS);
+  }
   const commitNotice = gitCommitNotice(updated);
   if (message || commitNotice) toast([message, commitNotice].filter(Boolean).join(' · '));
   tabs.remove(id, { stop: false });
@@ -821,7 +830,7 @@ function renderTaskBoard(boardKey, shown, emptyText) {
     const body = root.querySelector(`.col-body[data-drop="${s}"]`);
     const items = shown
       .filter((t) => t.status === s)
-      .sort((a, b) => columnSortValue(b) - columnSortValue(a) || String(b.created_at || '').localeCompare(String(a.created_at || '')));
+      .sort((a, b) => columnSortValue(a) - columnSortValue(b) || String(a.created_at || '').localeCompare(String(b.created_at || '')));
     counts[s] = items.length;
     const nodes = [];
     if (items.length === 0) {
@@ -868,7 +877,10 @@ function renderCard(t) {
     ev.dataTransfer.effectAllowed = 'move';
     card.classList.add('dragging');
   });
-  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  card.addEventListener('dragend', () => {
+    card.classList.remove('dragging');
+    clearBoardDropIndicators();
+  });
 
   // status line on top: a prominent status pill leads the card
   const tags = h('div', { class: 'card-tags' });
@@ -913,33 +925,58 @@ function renderCard(t) {
   return card;
 }
 
-/* drag & drop between columns — dropping into In Progress auto-starts/resumes */
+function clearBoardDropIndicators() {
+  for (const body of document.querySelectorAll('.col-body')) {
+    body.classList.remove('drag-over', 'drop-at-end');
+    for (const card of body.querySelectorAll('.card.drop-before')) card.classList.remove('drop-before');
+  }
+}
+
+function dropBeforeCard(body, clientY, draggingId) {
+  const cards = [...body.querySelectorAll('.card')]
+    .filter((card) => card.dataset.id !== draggingId && !card.classList.contains('dragging'));
+  return cards.reduce((closest, card) => {
+    const box = card.getBoundingClientRect();
+    const offset = clientY - box.top - box.height / 2;
+    return offset < 0 && offset > closest.offset ? { offset, card } : closest;
+  }, { offset: Number.NEGATIVE_INFINITY, card: null }).card;
+}
+
+/* drag & drop within and between columns — the release position is persisted */
 for (const body of document.querySelectorAll('.col-body')) {
   body.addEventListener('dragover', (ev) => {
     ev.preventDefault();
+    const id = ev.dataTransfer.getData('text/plain');
+    clearBoardDropIndicators();
     body.classList.add('drag-over');
+    const before = dropBeforeCard(body, ev.clientY, id);
+    if (before) before.classList.add('drop-before');
+    else body.classList.add('drop-at-end');
   });
-  body.addEventListener('dragleave', () => body.classList.remove('drag-over'));
+  body.addEventListener('dragleave', (ev) => {
+    if (ev.relatedTarget && body.contains(ev.relatedTarget)) return;
+    clearBoardDropIndicators();
+  });
   body.addEventListener('drop', async (ev) => {
     ev.preventDefault();
-    body.classList.remove('drag-over');
     const id = ev.dataTransfer.getData('text/plain');
     const status = body.dataset.drop;
     const task = byId.get(id);
-    if (!task || task.status === status) return;
-    task.status = status;
-    renderBoard();
+    const before = dropBeforeCard(body, ev.clientY, id);
+    const beforeId = before ? before.dataset.id : null;
+    clearBoardDropIndicators();
+    if (!task) return;
     try {
-      if (status === 'in_progress' && !task.archived) {
+      if (status === 'in_progress' && task.status !== status && !task.archived) {
         // Auto-launch: resume if it already has a session, otherwise start fresh.
-        if (task.session_id) await api.send('POST', `/api/tasks/${id}/resume`);
-        else await api.send('POST', `/api/tasks/${id}/start`);
+        if (task.session_id) await api.send('POST', `/api/tasks/${id}/resume`, { before_id: beforeId });
+        else await api.send('POST', `/api/tasks/${id}/start`, { before_id: beforeId });
         await refresh(true);
         openTab(byId.get(id) || task);
-      } else if (status === 'done') {
-        await completeTaskAndClose(id);
+      } else if (status === 'done' && task.status !== status) {
+        await completeTaskAndClose(id, { beforeId });
       } else {
-        await api.send('PATCH', `/api/tasks/${id}`, { status });
+        await api.send('POST', `/api/tasks/${id}/move`, { status, before_id: beforeId });
         await refresh(true);
       }
     } catch (e) {

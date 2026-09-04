@@ -76,6 +76,38 @@ test('tasks track when they enter their current column', async () => {
   db.db.close();
 });
 
+test('new tasks append and moves persist exact positions within and across columns', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-task-order-'));
+  const db = loadDb(path.join(tmp, 'tasks.db'));
+  const first = db.createTask({ title: 'first', project_path: tmp });
+  const second = db.createTask({ title: 'second', project_path: tmp });
+  const third = db.createTask({ title: 'third', project_path: tmp });
+
+  assert.deepEqual(
+    db.listTasks().filter((task) => task.status === 'backlog').sort((a, b) => a.col_order - b.col_order).map((task) => task.id),
+    [first.id, second.id, third.id],
+  );
+
+  db.moveTask(third.id, 'backlog', first.id);
+  assert.deepEqual(
+    db.listTasks().filter((task) => task.status === 'backlog').sort((a, b) => a.col_order - b.col_order).map((task) => task.id),
+    [third.id, first.id, second.id],
+  );
+
+  db.moveTask(first.id, 'in_progress');
+  db.moveTask(second.id, 'in_progress', first.id);
+  assert.deepEqual(
+    db.listTasks().filter((task) => task.status === 'in_progress').sort((a, b) => a.col_order - b.col_order).map((task) => task.id),
+    [second.id, first.id],
+  );
+  assert.deepEqual(
+    db.listTasks().filter((task) => task.status === 'backlog').map((task) => task.id),
+    [third.id],
+  );
+
+  db.db.close();
+});
+
 test('migration backups are retained by count and stale zero-byte sidecars are removed', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-db-backups-'));
   const dbPath = path.join(tmp, 'tasks.db');

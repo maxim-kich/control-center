@@ -394,6 +394,22 @@ body.restore-loading-active > :not(.restore-loading) {
 }
 .card:active { cursor: grabbing; }
 .card.dragging { opacity: 0.45; }
+.card.drop-before::before,
+.col-body.drop-at-end::after {
+  content: '';
+  display: block;
+  height: 2px;
+  flex: 0 0 2px;
+  background: var(--accent);
+  border-radius: var(--radius-full);
+  pointer-events: none;
+}
+.card.drop-before::before {
+  position: absolute;
+  top: calc(var(--space-3) / -2 - 1px);
+  right: 0;
+  left: 0;
+}
 .card.s-running { border-top-color: var(--green); }
 .card.s-needs_attention { border-top-color: var(--amber); }
 .card.s-waiting { border-top-color: var(--border-2); }
