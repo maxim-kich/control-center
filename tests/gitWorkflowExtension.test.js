@@ -54,6 +54,7 @@ function loadGitWorkflow(db, tmp, opts = {}) {
   platform.installBundled('git-workflow', { enable: true });
   if (opts.active !== false) platform.switchOwnership('git', 'git-workflow');
   const manager = loadExtensions({
+    app: opts.app,
     extensionsDir,
     context: { db, paths, workspaceRoot: tmp },
     platform,
@@ -100,6 +101,50 @@ test('Git Workflow extension commits task-scoped files as the active Git owner',
     db.db.close();
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('Git setup endpoint creates a project repository inside a parent without changing the parent', async (t) => {
+  if (!gitAvailable()) return t.skip('git is not installed');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-git-init-'));
+  const parent = makeRepo();
+  const projectPath = path.join(parent, 'child');
+  fs.mkdirSync(projectPath);
+  fs.writeFileSync(path.join(projectPath, 'note.txt'), 'project content\n');
+  const db = loadDb(path.join(tmp, 'tasks.db'));
+  const app = require('express')();
+  const { manager } = loadGitWorkflow(db, tmp, { app });
+  const project = db.createProject({ name: 'Child', path: projectPath });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const endpoint = `http://127.0.0.1:${server.address().port}/api/extensions/git-workflow/projects/${project.id}`;
+  try {
+    const before = await (await fetch(`${endpoint}/status`)).json();
+    assert.equal(before.git.git_repo_kind, 'parent');
+    const parentHead = git(parent, ['rev-parse', 'HEAD']);
+    const parentStatus = git(parent, ['status', '--porcelain']);
+    const parentConfig = fs.readFileSync(path.join(parent, '.git', 'config'), 'utf8');
+    const response = await fetch(`${endpoint}/init`, { method: 'POST' });
+    const result = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(result));
+    assert.equal(result.init.initialized, true);
+    assert.equal(result.git.git_repo_kind, 'own');
+    assert.equal(result.git.git_initialized, 1);
+    assert.equal(result.git.git_parent_repo_root, null);
+    assert.equal(fs.realpathSync(git(projectPath, ['rev-parse', '--show-toplevel'])), fs.realpathSync(projectPath));
+    assert.equal(git(parent, ['rev-parse', 'HEAD']), parentHead);
+    assert.equal(git(parent, ['status', '--porcelain']), parentStatus);
+    assert.equal(fs.readFileSync(path.join(parent, '.git', 'config'), 'utf8'), parentConfig);
+    const after = await (await fetch(`${endpoint}/status`)).json();
+    assert.equal(after.git.git_repo_kind, 'own');
+    const repeated = await (await fetch(`${endpoint}/init`, { method: 'POST' })).json();
+    assert.equal(repeated.init.initialized, false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await manager.shutdown({ reason: 'test' });
+    db.db.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 
