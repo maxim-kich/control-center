@@ -631,6 +631,13 @@ function taskBoardSignature(t) {
     t.title || '',
     t.description || '',
     t.project_path || '',
+    t.provider || '',
+    t.model || '',
+    t.effort || '',
+    t.mode || '',
+    t.yolo ? 1 : 0,
+    t.ultracode ? 1 : 0,
+    t.started_at || '',
     t.parent_task_id || '',
     t.session_id ? 1 : 0,
     (t.children || []).join(','),
@@ -1202,8 +1209,8 @@ $('#taskForm').addEventListener('submit', async (ev) => {
   try {
     if (id) await api.send('PATCH', `/api/tasks/${id}`, body);
     else await api.send('POST', '/api/tasks', body);
+    await refresh(true);
     hide('taskModal');
-    refresh(true);
   } catch (e) {
     toast('Save failed: ' + e.message, { err: true });
   }
