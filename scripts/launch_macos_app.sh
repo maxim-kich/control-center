@@ -75,59 +75,16 @@ resolve_cmd() {
   return 1
 }
 
-health_ok() {
-  /usr/bin/curl -fsS --max-time 2 "${URL}/api/health" >/dev/null 2>&1
+readiness_ok() {
+  local response
+  # A fixed application marker rejects unrelated HTTP servers. Never run CLI
+  # diagnostics here: their latency says nothing about server readiness.
+  response="$(/usr/bin/curl -fsS --connect-timeout 1 --max-time 2 "${URL}/api/ready" 2>/dev/null)" || return 1
+  [ "$response" = "control-center" ]
 }
 
 port_is_open() {
   /usr/bin/nc -z "$HOST" "$PORT" >/dev/null 2>&1
-}
-
-dashboard_server_pid() {
-  local pid cmd
-  if [ -f "$PID_FILE" ]; then
-    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-      if printf '%s' "$cmd" | /usr/bin/grep -Eq '(^|[/ ])node( |$).*server\.js'; then
-        printf '%s\n' "$pid"
-        return 0
-      fi
-    fi
-  fi
-
-  while read -r pid; do
-    [ -n "$pid" ] || continue
-    cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    if printf '%s' "$cmd" | /usr/bin/grep -Eq '(^|[/ ])node( |$).*server\.js'; then
-      printf '%s\n' "$pid"
-      return 0
-    fi
-  done < <(/usr/sbin/lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)
-
-  return 1
-}
-
-stop_stale_dashboard_server() {
-  local pid
-  pid="$(dashboard_server_pid || true)"
-  [ -n "$pid" ] || return 1
-  log "stopping stale server pid=${pid}"
-  kill "$pid" 2>/dev/null || return 1
-  for _ in $(seq 1 40); do
-    if ! port_is_open; then
-      return 0
-    fi
-    sleep 0.25
-  done
-  kill -9 "$pid" 2>/dev/null || true
-  for _ in $(seq 1 20); do
-    if ! port_is_open; then
-      return 0
-    fi
-    sleep 0.25
-  done
-  return 1
 }
 
 open_dashboard() {
@@ -169,24 +126,30 @@ fi
 
 log "launcher root=${ROOT} url=${URL} codex=${CODEX_BIN:-not-found}"
 
-if health_ok; then
+if readiness_ok; then
   log "server already running"
   open_dashboard
   exit 0
 fi
 
 if port_is_open; then
-  log "port ${PORT} is occupied but health check did not answer"
-  if stop_stale_dashboard_server; then
-    log "stale server stopped"
-  else
-    alert_error "${APP_NAME} could not start because ${URL} is already occupied and not answering.
+  log "port ${PORT} is occupied; waiting for readiness"
+  for _ in $(seq 1 80); do
+    if readiness_ok; then
+      log "server already running"
+      open_dashboard
+      exit 0
+    fi
+    sleep 0.25
+  done
+  # A timeout is not proof of a stale process (diagnostics may be blocking its
+  # event loop). Leave the listener and any PID-file process untouched.
+  log "port ${PORT} did not identify a ready Control Center server; leaving it running"
+  alert_error "${APP_NAME} could not start because ${URL} is occupied and did not report Control Center readiness.
 
-Close the process using port ${PORT}, or choose another port with:
+Wait and try again, or choose another port with:
 PORT=4000 npm run macos-app"
-    open_dashboard
-    exit 1
-  fi
+  exit 1
 fi
 
 if [ -z "$NODE_BIN" ]; then
@@ -233,7 +196,7 @@ log "starting server with ${NODE_BIN}"
 SERVER_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
 attempt=0
 while [ "$attempt" -lt 80 ]; do
-  if health_ok; then
+  if readiness_ok; then
     log "server ready pid=${SERVER_PID:-unknown}"
     open_dashboard
     exit 0

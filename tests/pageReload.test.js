@@ -70,6 +70,10 @@ test('page bootstrap restores provider configuration without invoking slow CLI d
     await response.json();
   }
   assert.equal(fs.existsSync(marker), false, 'reload must not run doctor, regardless of its cache');
+  const ready = await fetch(`${base}/api/ready`, { signal: AbortSignal.timeout(1000) });
+  assert.equal(ready.status, 200);
+  assert.equal(await ready.text(), 'control-center\n');
+  assert.equal(fs.existsSync(marker), false, 'readiness must not run CLI diagnostics');
   const health = await (await fetch(`${base}/api/health`)).json();
   assert.equal(fs.existsSync(marker), true, 'fixture must exercise real diagnostics on health');
   assert.equal(health.codexAuthConfigured, true, 'existing diagnostic contract is preserved');

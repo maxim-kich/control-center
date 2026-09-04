@@ -121,6 +121,10 @@ app.use((req, res, next) => {
   if (req.path === '/api/extensions/install-folder') return next();
   return jsonParser(req, res, next);
 });
+// Readiness must stay independent of configuration and CLI diagnostics.
+app.get('/api/ready', (req, res) => {
+  res.type('text/plain').send('control-center\n');
+});
 app.use(express.static(path.join(ROOT, 'public')));
 // Serve the vendored xterm assets straight from node_modules (no build step).
 app.use('/vendor/xterm', express.static(path.join(ROOT, 'node_modules', '@xterm', 'xterm')));
@@ -372,7 +376,7 @@ function withChildren(tasks) {
 
 app.get(['/api/health', '/api/bootstrap'], (req, res) => {
   // Page restoration needs configuration, never blocking CLI diagnostics.
-  // Keep the existing health contract for launchers and diagnostic consumers.
+  // Keep the existing health contract for diagnostic consumers.
   const bootstrap = req.path === '/api/bootstrap';
   let nodePtyOk = true;
   try {
