@@ -1327,6 +1327,18 @@ body.restore-loading-active > :not(.restore-loading) {
   overflow: hidden;
 }
 .modal-sm { max-width: 480px; }
+.hook-review-dialog {
+  max-width: 1000px;
+  height: min(760px, 88vh);
+  padding: 0;
+  color: var(--text);
+  margin: auto;
+}
+.hook-review-dialog:not([open]) { display: none; }
+.hook-review-dialog::backdrop { background: rgba(0, 0, 0, 0.65); }
+.hook-review-description, .hook-review-status { margin: 0; padding: 12px 18px; font-size: 13px; }
+.hook-review-status { border-top: 1px solid var(--border); }
+.hook-review-terminal { flex: 1; min-height: 0; margin: 0 12px; background: #000; }
 .modal-md { max-width: 580px; height: 72vh; }
 .modal-lg { max-width: 920px; height: 88vh; }
 .modal-head {

@@ -172,6 +172,7 @@ function recoverIdleAfterTool(db, taskId, ts) {
 }
 
 function main() {
+  if (process.env.CC_HOOK_REVIEW === '1') return 0;
   const event = process.argv[2] || '';
   const data = readJsonStdin();
   const taskId = process.env.CC_TASK_ID;

@@ -89,6 +89,20 @@ control-center/
 
 Codex and Claude tasks launch real interactive CLI sessions through `node-pty`. Control Center does not use `codex exec`, Claude `--print`, SDK, or API-credit launch modes for task sessions.
 
+Codex tracking hooks use Codex's saved hook trust. When approval is needed, starting,
+resuming, or forking a task opens a separate approval modal containing Codex's native
+review terminal. Review and trust the Control Center hooks there; the waiting action
+continues automatically once all tracking hooks are trusted and enabled. Cancel
+leaves the action pending without starting it. The review session creates no Control
+Center task or tracking records, and closes when the modal closes.
+
+Hook approval is independent of YOLO. Control Center never adds
+`--dangerously-bypass-hook-trust`. Trust checks require a Codex version supporting
+the app-server `hooks/list` method (verified with 0.153.2); unsupported APIs or failed
+checks stop the launch with an error. Codex stores trust for the exact hook definition,
+so changed definitions or paths can require another review. Other project or plugin
+hooks retain Codex's normal review behavior. Control Center does not edit trust files.
+
 Claude launches use generated hook settings under `CONTROL_CENTER_HOME` and strip Anthropic API-token environment variables from child sessions so the Claude CLI uses the user's normal subscription auth.
 
 ## Import

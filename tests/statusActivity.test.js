@@ -71,9 +71,13 @@ if (args[0] === 'doctor') {
   console.log(JSON.stringify({ checks: { 'auth.credentials': { status: 'ok' } } }));
   process.exit(0);
 }
+if (args[0] === 'app-server') {
+  require(${JSON.stringify(path.join(__dirname, 'fixtures/hookAwareCodex.cjs'))}).serveHooks({ trusted: true });
+} else {
 console.log('fake codex ready');
 process.stdin.resume();
 setInterval(() => {}, 1000);
+}
 `);
   fs.chmodSync(file, 0o755);
 }
@@ -144,6 +148,11 @@ test('Codex Stop reaches needs-attention, typing preserves it, and submitting re
       headers: { Origin: base },
     });
     await once(ws, 'open');
+
+    const launchDeadline = Date.now() + 5000;
+    while (!(await fetchTask(base, task.id)).live && Date.now() < launchDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
 
     let listed = await fetchTask(base, task.id);
     assert.equal(listed.live, true);

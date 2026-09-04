@@ -17,14 +17,12 @@ test('codex buildArgs maps task settings to interactive CLI args', () => {
     mode: 'build',
     skipPermissions: true,
     hookArgs: ['-c', 'hooks.Stop=[]'],
-    hookTrustFlag: true,
   });
   assert.deepEqual(args, [
     '-C', '/repo',
     '--model', 'gpt-5.4',
     '-c', 'model_reasoning_effort="high"',
     '-c', 'hooks.Stop=[]',
-    '--dangerously-bypass-hook-trust',
     '--dangerously-bypass-approvals-and-sandbox',
     'do it',
   ]);
@@ -64,7 +62,7 @@ test('codex hook args include PostToolUse activity recovery hook', () => {
   assert.ok(args.some((arg) => arg.startsWith('hooks.PostToolUse=')));
 });
 
-test('codex buildArgs skips hook trust flag when selected CLI does not support it', () => {
+test('codex buildArgs never bypasses hook trust, including YOLO launches', () => {
   const codex = require('../lib/codex');
   const args = codex.buildArgs({
     kind: 'resume',
@@ -75,7 +73,6 @@ test('codex buildArgs skips hook trust flag when selected CLI does not support i
     mode: 'build',
     skipPermissions: true,
     hookArgs: ['-c', 'hooks.Stop=[]'],
-    hookTrustFlag: false,
   });
   assert.ok(args.includes('-c'));
   assert.ok(args.includes('hooks.Stop=[]'));

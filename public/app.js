@@ -77,6 +77,10 @@ const api = {
     });
     if (reloadForChangedServerBoot(r)) return new Promise(() => {});
     const data = await r.json().catch(() => ({}));
+    if (r.status === 409 && data.code === 'HOOK_TRUST_REQUIRED') {
+      if (!await reviewTaskHooks(data.taskId)) throw new Error('Hook review cancelled. The task was not started.');
+      return this.send(method, url, body);
+    }
     if (!r.ok) throw new Error(data.error || r.statusText);
     return data;
   },
@@ -984,6 +988,80 @@ for (const body of document.querySelectorAll('.col-body')) {
 
 /* ------------------------------------------------------------ task actions */
 
+let activeHookReview = null;
+function reviewTaskHooks(taskId) {
+  if (activeHookReview) return activeHookReview;
+  activeHookReview = new Promise((resolve) => {
+    const previousFocus = document.activeElement;
+    const host = h('div', { class: 'hook-review-terminal' });
+    const status = h('p', { class: 'hook-review-status', role: 'status' }, 'Waiting for hook approval…');
+    const dialog = h('dialog', { class: 'modal hook-review-dialog', 'aria-labelledby': 'hookReviewTitle' },
+      h('div', { class: 'modal-head' },
+        h('h3', { id: 'hookReviewTitle' }, 'Approve Codex tracking hooks'),
+        h('button', { class: 'btn btn-sm', onclick: () => finish(false) }, 'Cancel')),
+      h('p', { class: 'hook-review-description' }, 'Review Control Center’s hooks in Codex below. Your task will start automatically once they are trusted and enabled.'),
+      host, status);
+    document.body.append(dialog);
+    dialog.showModal();
+    const term = new Terminal({
+      cursorBlink: true, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fontSize: 13, theme: { background: '#000000', foreground: '#e6edf3' }, scrollback: 1000,
+    });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(host);
+    let finished = false;
+    let timer;
+    const ws = new WebSocket(`ws://${location.host}/hook-review?taskId=${encodeURIComponent(taskId)}`);
+    const send = (message) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)); };
+    const resize = () => { fit.fit(); send({ t: 'resize', cols: term.cols, rows: term.rows }); };
+    const observer = new ResizeObserver(resize);
+    observer.observe(host);
+    function finish(approved) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      observer.disconnect();
+      ws.close();
+      term.dispose();
+      dialog.close();
+      dialog.remove();
+      previousFocus?.focus();
+      resolve(approved);
+    }
+    async function check() {
+      try {
+        const result = await api.get(`/api/tasks/${encodeURIComponent(taskId)}/hook-trust`);
+        if (finished) return;
+        if (result.ready) return finish(true);
+        const pending = result.hooks.filter((hook) => !hook.enabled || !['trusted', 'managed'].includes(hook.trustStatus));
+        status.textContent = `${pending.length} tracking hook${pending.length === 1 ? '' : 's'} still need approval or enabling.`;
+      } catch (error) {
+        if (!finished) status.textContent = 'Could not verify approval: ' + error.message + ' Retrying…';
+      }
+      if (!finished) timer = setTimeout(check, 2500);
+    }
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      // Escape is part of Codex's review navigation when the terminal has focus.
+      if (!host.contains(document.activeElement)) finish(false);
+    });
+    dialog.addEventListener('keydown', (event) => event.stopPropagation());
+    term.onData((d) => send({ t: 'data', d }));
+    ws.onopen = () => { resize(); term.focus(); check(); };
+    ws.onmessage = (event) => {
+      let message;
+      try { message = JSON.parse(event.data); } catch { return; }
+      if (message.t === 'data') term.write(message.d);
+      if (message.t === 'error') status.textContent = message.d;
+      if (message.t === 'exit') status.textContent = 'Review session ended. Checking saved approval…';
+    };
+    ws.onerror = () => { if (!finished) status.textContent = 'Review connection failed. Cancel and try again.'; };
+    ws.onclose = () => { if (!finished) status.textContent = 'Review connection closed. Cancel and try again.'; };
+  }).finally(() => { activeHookReview = null; });
+  return activeHookReview;
+}
+
 async function startTask(t) {
   try {
     await api.send('POST', `/api/tasks/${t.id}/start`);
@@ -1726,6 +1804,12 @@ const tabs = {
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
       if (m.t === 'data') this.queueWrite(tab, m.d);
+      else if (m.t === 'ready') this.fit(tab);
+      else if (m.t === 'hook-trust-required') {
+        reviewTaskHooks(task.id).then((approved) => {
+          if (approved && this.map.get(task.id) === tab) this.connect(tab, task);
+        });
+      }
       else if (m.t === 'exit') {
         tab.exited = true;
         this.queueWrite(tab, `\r\n\x1b[90m[codex session ended${m.code != null ? ' · exit ' + m.code : ''}]\x1b[0m\r\n`);

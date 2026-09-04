@@ -34,6 +34,7 @@ const { GraphifyManager, graphifyProjectInfo } = require('./lib/graphify');
 const { autoCommitTaskProject } = require('./lib/gitAutoCommit');
 const { hasProjectGit, projectGitApiFields, clearProjectGitCache } = require('./lib/gitRoots');
 const { buildHookArgs } = require('./lib/hooksSettings');
+const { checkHookTrust, reviewEnv } = require('./lib/hookTrust');
 const { ensureSpawnHelper } = require('./lib/ensurePty');
 const updater = require('./lib/core/updater');
 const { loadExtensions, installExtensionUpload, installExtensionGit } = require('./lib/core/extensions');
@@ -46,7 +47,7 @@ const { catalog: modelCatalog } = require('./lib/modelCatalog');
 modelCatalog.configure({ codex: codex.CODEX_BIN, claude: getProvider('claude').bin }, {
   codex: codex.buildEnv, claude: getProvider('claude').buildEnv,
 });
-const { SessionManager } = require('./lib/sessionRunner');
+const { SessionManager, SessionRunner } = require('./lib/sessionRunner');
 
 // Self-heal node-pty's spawn-helper +x bit (survives `npm install --ignore-scripts`).
 ensureSpawnHelper();
@@ -1500,7 +1501,32 @@ app.get('/api/tasks/archived', (req, res) => {
   res.json(withChildren(db.listTasks(true).filter((t) => t.archived)));
 });
 
-app.post('/api/tasks/:id/start', (req, res) => {
+async function taskHookTrust(task) {
+  if ((task.provider || 'codex') !== 'codex') return { ready: true, hooks: [] };
+  const cwd = codex.resolveProjectPath(task.project_path);
+  if (!codex.safeIsDir(cwd)) throw new Error(`Project path does not exist: ${cwd}`);
+  return checkHookTrust({ cwd, hookArgs });
+}
+
+async function requireTaskHookTrust(task, res) {
+  try {
+    const status = await taskHookTrust(task);
+    if (status.ready) return true;
+    res.status(409).json({ error: 'Control Center tracking hooks need approval.', code: 'HOOK_TRUST_REQUIRED', taskId: task.id });
+  } catch (error) {
+    res.status(503).json({ error: 'Cannot verify Codex hooks: ' + error.message });
+  }
+  return false;
+}
+
+app.get('/api/tasks/:id/hook-trust', async (req, res) => {
+  const task = db.getTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'not found' });
+  try { res.json(await taskHookTrust(task)); }
+  catch (error) { res.status(503).json({ error: error.message }); }
+});
+
+app.post('/api/tasks/:id/start', async (req, res) => {
   const task = db.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'not found' });
   if (rejectUnsupportedLaunch(res, task)) return;
@@ -1514,6 +1540,7 @@ app.post('/api/tasks/:id/start', (req, res) => {
     return res.status(400).json({ error: `project path does not exist: ${cwd}` });
   }
   const openingPrompt = provider.taskOpeningPrompt(task);
+  if (!await requireTaskHookTrust(task, res)) return;
   db.moveTask(task.id, 'in_progress', req.body && req.body.before_id != null ? String(req.body.before_id) : null);
   db.updateTask(task.id, {
     started_at: task.started_at || db.now(),
@@ -1524,22 +1551,24 @@ app.post('/api/tasks/:id/start', (req, res) => {
   res.json({ sessionId: null, pending: true });
 });
 
-app.post('/api/tasks/:id/resume', (req, res) => {
+app.post('/api/tasks/:id/resume', async (req, res) => {
   const task = db.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'not found' });
   if (rejectUnsupportedLaunch(res, task)) return;
   if (!task.session_id) return res.status(400).json({ error: 'no session to resume — use start' });
+  if (!manager.isLive(task.id) && !await requireTaskHookTrust(task, res)) return;
   db.moveTask(task.id, 'in_progress', req.body && req.body.before_id != null ? String(req.body.before_id) : null);
   if (!manager.isLive(task.id)) pending.set(task.id, { kind: 'resume', sessionId: task.session_id });
   db.updateTask(task.id, { ended_at: null });
   res.json({ sessionId: task.session_id });
 });
 
-app.post('/api/tasks/:id/fork', (req, res) => {
+app.post('/api/tasks/:id/fork', async (req, res) => {
   const parent = db.getTask(req.params.id);
   if (!parent) return res.status(404).json({ error: 'not found' });
   if (rejectUnsupportedLaunch(res, parent)) return;
   if (!parent.session_id) return res.status(400).json({ error: 'parent has no session to fork from' });
+  if (!await requireTaskHookTrust(parent, res)) return;
   const provider = launchProvider(parent);
   if (!provider.safeIsDir(provider.resolveProjectPath(parent.project_path))) {
     return res.status(400).json({ error: `project path does not exist: ${parent.project_path}` });
@@ -1718,7 +1747,7 @@ server.on('upgrade', (req, socket, head) => {
   } catch {
     return socket.destroy();
   }
-  if (url.pathname !== '/pty') return socket.destroy();
+  if (!['/pty', '/hook-review'].includes(url.pathname)) return socket.destroy();
   // CSWSH protection: same-origin only. (Express middleware doesn't run on upgrades.)
   const origin = req.headers.origin;
   if (origin && !ALLOWED_ORIGINS.has(origin)) return socket.destroy();
@@ -1731,7 +1760,7 @@ function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
 
-wss.on('connection', (ws, req, url) => {
+wss.on('connection', async (ws, req, url) => {
   const taskId = url.searchParams.get('taskId');
   const task = taskId && db.getTask(taskId);
   if (!task) {
@@ -1744,11 +1773,51 @@ wss.on('connection', (ws, req, url) => {
     ws.isAlive = true;
   });
 
+  if (url.pathname === '/hook-review') {
+    if ((task.provider || 'codex') !== 'codex') return ws.close();
+    let review;
+    try {
+      const cwd = codex.resolveProjectPath(task.project_path);
+      if (!codex.safeIsDir(cwd)) throw new Error('Project directory does not exist.');
+      review = new SessionRunner({
+        key: 'hook-review', file: codex.CODEX_BIN, cwd, env: reviewEnv(),
+        args: ['-C', cwd, ...hookArgs, '--sandbox', 'read-only', '--ask-for-approval', 'on-request'],
+      });
+      review.attach(ws);
+    } catch (error) {
+      send(ws, { t: 'error', d: error.message });
+      return ws.close();
+    }
+    ws.on('message', (raw) => {
+      let message;
+      try { message = JSON.parse(raw.toString()); } catch { return; }
+      if (message.t === 'data' && typeof message.d === 'string') review.write(message.d);
+      if (message.t === 'resize') review.resize(Math.min(300, Number(message.cols)), Math.min(100, Number(message.rows)));
+    });
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      review.detach(ws);
+      review.kill();
+      review.dispose();
+    };
+    ws.on('close', cleanup);
+    ws.on('error', cleanup);
+    return;
+  }
+
   let runner;
   try {
     if (manager.isLive(task.id)) {
       runner = manager.get(task.id);
     } else {
+      const status = await taskHookTrust(task);
+      if (ws.readyState !== ws.OPEN) return;
+      if (!status.ready) {
+        send(ws, { t: 'hook-trust-required', taskId: task.id });
+        return ws.close();
+      }
       const p = pending.get(task.id);
       const cwd = codex.resolveProjectPath(task.project_path);
       if (!codex.safeIsDir(cwd)) {
@@ -1788,6 +1857,9 @@ wss.on('connection', (ws, req, url) => {
     }
   });
 
+  // The trust preflight is asynchronous; an initial resize sent on socket open
+  // can arrive before the runner exists. Ask the client to fit it again now.
+  send(ws, { t: 'ready' });
   const cleanup = () => manager.detach(task.id, ws);
   ws.on('close', cleanup);
   ws.on('error', cleanup);
