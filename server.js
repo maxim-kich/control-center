@@ -492,8 +492,8 @@ function extensionInstallPayload(installed) {
   };
 }
 
-function extensionPlatformPayload(extension) {
-  const manager = refreshExtensionManager();
+function extensionPlatformPayload(extension, { refresh = true } = {}) {
+  const manager = refresh ? refreshExtensionManager() : extensionManager;
   return {
     ok: true,
     extension,
@@ -546,8 +546,9 @@ app.post('/api/extensions/:extensionId/enable', (req, res) => {
 
 app.post('/api/extensions/:extensionId/disable', async (req, res) => {
   try {
-    await extensionManager.shutdown({ reason: 'extension-disabled' });
-    res.json(extensionPlatformPayload(extensionPlatform.disable(req.params.extensionId)));
+    const extension = await extensionManager.disable(req.params.extensionId);
+    // Preserve other extensions' live module instances and lifecycle handlers.
+    res.json(extensionPlatformPayload(extension, { refresh: false }));
   } catch (e) {
     extensionPlatformError(res, e);
   }
