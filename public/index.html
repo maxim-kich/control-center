@@ -278,7 +278,7 @@
   </section>
 
   <div class="modal-overlay" id="updateConfirmModal" hidden>
-    <div class="modal modal-sm update-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="updateConfirmTitle" aria-describedby="updateConfirmDescription">
+    <div class="modal modal-sm update-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="updateConfirmTitle" aria-describedby="updateConfirmDescription updateConfirmSessions">
       <header class="modal-head update-confirm-head">
         <div class="modal-head-main">
           <div class="update-confirm-eyebrow" id="updateConfirmEyebrow">New version available</div>
@@ -293,6 +293,7 @@
           <span class="update-version-pill latest" id="updateLatestVersion">Latest</span>
         </div>
         <p id="updateConfirmDescription">Control Center will install the latest version and restart the local server. Your projects and runtime data will stay in place.</p>
+        <p id="updateConfirmSessions">All active consoles and sessions will close when the app restarts. Your task data and saved conversations will stay in each task. You can relaunch sessions from their tasks after the update.</p>
         <div class="update-confirm-note">
           <span class="update-confirm-note-icon" aria-hidden="true">↻</span>
           <span>The app will reconnect automatically after the restart.</span>
@@ -300,7 +301,7 @@
       </div>
       <footer class="update-confirm-actions">
         <button class="btn" id="cancelUpdateConfirmBtn" data-close="updateConfirmModal" type="button">Cancel</button>
-        <button class="btn btn-primary" id="confirmUpdateBtn" type="button">Update and restart</button>
+        <button class="btn btn-primary" id="confirmUpdateBtn" type="button">Close sessions and update</button>
       </footer>
     </div>
   </div>

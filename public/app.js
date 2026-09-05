@@ -2596,7 +2596,7 @@ function openUpdateConfirmModal(kind) {
     : 'Control Center will install the latest version and restart the local server. Your projects and runtime data will stay in place.';
   $('#updateCurrentVersion').textContent = version.version || 'Current';
   $('#updateLatestVersion').textContent = rollback ? (version.rollbackRef || 'Previous') : (version.latestReleaseVersion || 'Latest');
-  $('#confirmUpdateBtn').textContent = rollback ? 'Rollback and restart' : 'Update and restart';
+  $('#confirmUpdateBtn').textContent = rollback ? 'Close sessions and rollback' : 'Close sessions and update';
   show('updateConfirmModal');
   $('#confirmUpdateBtn').focus();
 }
@@ -2606,10 +2606,10 @@ async function confirmUpdateAction() {
   if (!kind) return;
   pendingUpdateAction = null;
   hide('updateConfirmModal');
-  await executeUpdateAction(kind);
+  await executeUpdateAction(kind, { closeSessions: true });
 }
 
-async function executeUpdateAction(kind) {
+async function executeUpdateAction(kind, { closeSessions = false } = {}) {
   const endpoints = {
     dryRun: '/api/update/dry-run',
     apply: '/api/update/apply',
@@ -2623,7 +2623,10 @@ async function executeUpdateAction(kind) {
   updateActionSaving = labels[kind] + ' running...';
   renderVersionSettings();
   try {
-    const res = await api.send('POST', endpoints[kind], {});
+    // The modal explicitly authorizes closing sessions during the successful restart.
+    // Keep dry runs and unconfirmed calls behind the server's active-session guard.
+    const body = closeSessions && (kind === 'apply' || kind === 'rollback') ? { force: true } : {};
+    const res = await api.send('POST', endpoints[kind], body);
     GENERAL_SETTINGS = { ...GENERAL_SETTINGS, version: res.version || GENERAL_SETTINGS.version };
     if (res.restarting) {
       restartingServer = true;
