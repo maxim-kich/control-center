@@ -264,3 +264,33 @@ test('enabling a newly discovered external extension preserves migration state a
     fs.rmSync(fx.root, { recursive: true, force: true });
   }
 });
+
+for (const available of ['claude', 'codex']) {
+  test(`Graphify provider setup works with only ${available} installed`, async (t) => {
+    const fx = fixture();
+    const { getProvider } = require('../lib/providers');
+    const calls = [];
+    for (const id of ['codex', 'claude']) {
+      const provider = getProvider(id);
+      t.mock.method(provider, 'detect', () => ({ id, installed: id === available, connected: true }));
+      t.mock.method(provider, 'setupExtension', async () => { calls.push(id); return { ok: true }; });
+    }
+    try {
+      writeBundle(fx.bundledDir, 'graphify', '1.0.0', { ownership: ['graphify'], permissions: ['providers:setup'] });
+      const platform = new ExtensionPlatform(fx);
+      platform.prepare();
+      platform.installBundled('graphify', { enable: true });
+      platform.switchOwnership('graphify', 'graphify');
+      const api = platform.capabilitiesFor(platform.extensionById('graphify'));
+      for (const id of ['codex', 'claude']) {
+        const result = await api.providers.setup(id, { path: fx.root }, { integration: 'graphify', ownership: 'graphify' });
+        assert.equal(result.ok, true);
+        if (id !== available) assert.equal(result.skipped, true);
+      }
+      assert.deepEqual(calls, [available]);
+      assert.equal(fs.existsSync(path.join(fx.root, '.codex')), false);
+    } finally {
+      fs.rmSync(fx.root, { recursive: true, force: true });
+    }
+  });
+}

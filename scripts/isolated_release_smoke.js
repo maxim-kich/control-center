@@ -213,9 +213,10 @@ async function main() {
 
     await withServer(install, home, fixture.dbPath, async ({ port }) => {
       const diagnostics = await requestJson(port, '/api/extensions/diagnostics');
-      assert.equal(diagnostics.ownership.graphify.activeOwner, 'graphify');
+      assert.equal(diagnostics.ownership.graphify.activeOwner, 'legacy');
       assert.equal(diagnostics.ownership.git.activeOwner, 'git-workflow');
       assert.deepEqual(diagnostics.duplicateOwnership, []);
+      assert.equal(diagnostics.catalog.find((item) => item.id === 'graphify').installed, false);
       const payload = await requestJson(port, '/api/projects');
       const own = payload.projects.find((project) => project.id === 'own');
       assert.ok(own && Object.hasOwn(own, 'graphify_status'), 'Graphify compatibility fields missing');
@@ -236,9 +237,10 @@ async function main() {
     run(install, process.execPath, ['scripts/update.js', 'update', '--target', 'smoke-release', '--home', home, '--db-path', fixture.dbPath], { inherit: true });
     await withServer(install, home, fixture.dbPath, async ({ port }) => {
       const diagnostics = await requestJson(port, '/api/extensions/diagnostics');
-      assert.equal(diagnostics.ownership.graphify.activeOwner, 'graphify');
+      assert.equal(diagnostics.ownership.graphify.activeOwner, 'legacy');
       assert.equal(diagnostics.ownership.git.activeOwner, 'git-workflow');
       assert.deepEqual(diagnostics.duplicateOwnership, []);
+      assert.equal(diagnostics.catalog.find((item) => item.id === 'graphify').installed, false);
     });
     const reupdated = JSON.parse(readMeta(fixture.dbPath, MIGRATION_LEDGER_KEY));
     assert.equal(reupdated.completedAt, completed.completedAt, 're-update reran completed migration');

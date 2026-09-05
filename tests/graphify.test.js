@@ -271,3 +271,33 @@ test('GraphifyManager skips disabled projects and can clean up project integrati
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('Graphify contains rejected provider setup and continues processing projects', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-graphify-rejection-'));
+  const db = loadDb(path.join(tmp, 'tasks.db'));
+  const { GraphifyManager } = require('../lib/graphify');
+  const first = db.createProject({ name: 'Broken setup', path: tmp });
+  const nextPath = path.join(tmp, 'next');
+  fs.mkdirSync(nextPath);
+  const second = db.createProject({ name: 'Healthy setup', path: nextPath });
+  const manager = new GraphifyManager(db, {
+    watch: false, bootstrap: false, semanticAuto: false,
+    runProcess: async () => ({ ok: true }),
+    providerSetup: async (_provider, project) => {
+      if (project.id === first.id) throw new Error('provider setup failed');
+      return { ok: true };
+    },
+  });
+  try {
+    manager.enqueue(first.id, 'bootstrap');
+    manager.enqueue(second.id, 'bootstrap');
+    const failed = await waitForProject(db, first.id, (p) => p.graphify_status === 'error');
+    assert.match(failed.graphify_last_error, /provider setup failed/);
+    await waitForProject(db, second.id, (p) => p.graphify_status === 'current');
+    assert.equal(manager.runningId, null);
+  } finally {
+    manager.shutdown();
+    db.db.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

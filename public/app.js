@@ -356,7 +356,7 @@ function compatibilityOwner(domain) {
 }
 
 function legacyOwnsUi(domain) {
-  return compatibilityOwner(domain) === 'legacy';
+  return domain !== 'graphify' && compatibilityOwner(domain) === 'legacy';
 }
 
 async function queueProjectGraphify(project) {
@@ -3144,24 +3144,56 @@ function extensionUsesProjectSettings(ext) {
   return !!(ext.contributes && ext.contributes.projectFields && ext.contributes.projectFields.length);
 }
 
+async function changeBundledExtension(id, action) {
+  if (extensionInstallSaving) return;
+  extensionInstallSaving = true;
+  renderExtensionsSection();
+  try {
+    const route = action === 'install' || action === 'upgrade'
+      ? `/api/extensions/bundled/${id}/${action}`
+      : `/api/extensions/${id}/${action}`;
+    await api.send('POST', route, action === 'install' ? { enable: true } : {});
+    if (id === 'graphify' && (action === 'install' || action === 'enable')) {
+      await api.send('PUT', '/api/extensions/ownership/graphify', { owner: 'graphify' });
+    }
+    toast('Extension updated. Restart Control Center to apply.');
+  } catch (e) {
+    toast(e.message, { err: true });
+  } finally {
+    extensionInstallSaving = false;
+    await loadExtensions();
+  }
+}
+
 function renderExtensionsSection() {
   const summary = $('#extensionsSummary');
   const grid = $('#extensionGrid');
   const conflictList = $('#extensionConflictList');
   if (!summary || !grid || !conflictList) return;
   const extensions = EXTENSION_SETTINGS.extensions || [];
+  const catalog = (EXTENSION_SETTINGS.platform && EXTENSION_SETTINGS.platform.catalog) || [];
+  const available = catalog.filter((item) => item.bundledVersion && !item.installed);
   const conflicts = EXTENSION_SETTINGS.conflicts || [];
   const lifecycleFailures = (EXTENSION_SETTINGS.lifecycleDiagnostics || []).filter((item) => item.ok === false || item.type === 'policy-conflict');
   const issueCount = conflicts.length + lifecycleFailures.length;
   summary.textContent = `${extensions.length} installed · ${issueCount ? `${issueCount} need attention` : 'All healthy'}${extensionInstallSaving ? ' · Installing...' : ''}`;
   grid.replaceChildren();
   if (extensionInstallSaving) grid.append(renderExtensionInstallingCard());
-  if (!extensions.length && !extensionInstallSaving) {
+  if (!extensions.length && !available.length && !extensionInstallSaving) {
     grid.append(h('div', { class: 'empty-state' }, 'No extensions installed.'));
+  }
+  for (const item of available) {
+    grid.append(h('div', { class: 'extension-card' },
+      h('div', { class: 'extension-card-head' },
+        h('div', { class: 'extension-title' }, item.id === 'graphify' ? 'Graphify' : item.id),
+        h('span', { class: 'status-pill' }, 'Not installed')),
+      item.id === 'graphify' ? h('div', { class: 'extension-description' }, 'Optional project code graphs for Claude and Codex. Requires the Graphify CLI (uv tool install graphifyy).') : null,
+      h('div', { class: 'extension-card-actions' },
+        h('button', { type: 'button', class: 'btn btn-sm', disabled: extensionInstallSaving, onclick: () => changeBundledExtension(item.id, 'install') }, 'Install and enable'))));
   }
   if (extensions.length) {
     for (const ext of extensions) {
-      const status = ext.enabled ? 'Enabled' : 'Needs attention';
+      const status = ext.enabled ? 'Enabled' : ext.enabledByUser === false ? 'Disabled' : 'Needs attention';
       const capabilities = extensionCapabilities(ext);
       const extensionIssues = lifecycleFailures.filter((issue) => issue.extensionId === ext.id);
       grid.append(
@@ -3183,6 +3215,13 @@ function renderExtensionsSection() {
               )
             : h('div', { class: 'extension-capabilities-empty' }, 'No user-facing features declared.'),
           h('div', { class: 'extension-card-actions' },
+            h('button', { type: 'button', class: 'btn btn-sm', disabled: extensionInstallSaving,
+              onclick: () => changeBundledExtension(ext.id, ext.enabledByUser === false ? 'enable' : 'disable') },
+              ext.enabledByUser === false ? 'Enable' : 'Disable'),
+            ext.id === 'graphify' && ext.enabled && compatibilityOwner('graphify') === 'legacy'
+              ? h('button', { type: 'button', class: 'btn btn-sm', disabled: extensionInstallSaving, onclick: () => changeBundledExtension(ext.id, 'enable') }, 'Activate') : null,
+            catalog.some((item) => item.id === ext.id && item.updateAvailable)
+              ? h('button', { type: 'button', class: 'btn btn-sm', disabled: extensionInstallSaving, onclick: () => changeBundledExtension(ext.id, 'upgrade') }, 'Update') : null,
             extensionCanConfigure(ext)
               ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => configureExtension(ext) }, 'Configure')
               : null,

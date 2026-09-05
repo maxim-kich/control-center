@@ -67,7 +67,7 @@ async function migrationDryRunGate() {
       dryRun: true,
     });
     if (!result.ok) throw new Error('migration dry-run returned not ok');
-    if (result.plan.targets.graphify.targetOwner !== 'graphify') throw new Error('Graphify migration target missing');
+    if (result.plan.targets.graphify.targetOwner !== 'legacy') throw new Error('Graphify must remain opt-in');
     if (result.plan.targets.git.targetOwner !== 'git-workflow') throw new Error('Git Workflow migration target missing');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

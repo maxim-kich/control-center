@@ -266,7 +266,7 @@ test('bundled integration migration dry-run plans without mutating the source da
       dryRun: true,
     });
     assert.equal(result.ok, true);
-    assert.equal(result.plan.targets.graphify.targetOwner, 'graphify');
+    assert.equal(result.plan.targets.graphify.targetOwner, 'legacy');
     assert.equal(result.plan.targets.git.targetOwner, 'git-workflow');
     assert.equal(fs.existsSync(extensionsDir), false);
 
@@ -295,15 +295,15 @@ test('bundled integration migration installs bundles imports state and is idempo
       extensionsDir,
     });
     assert.equal(result.ok, true);
-    assert.equal(result.diagnostics.ownership.graphify.activeOwner, 'graphify');
+    assert.equal(result.diagnostics.ownership.graphify.activeOwner, 'legacy');
     assert.equal(result.diagnostics.ownership.git.activeOwner, 'git-workflow');
-    assert.equal(fs.existsSync(path.join(extensionsDir, 'graphify', 'extension.json')), true);
+    assert.equal(fs.existsSync(path.join(extensionsDir, 'graphify', 'extension.json')), false);
     assert.equal(fs.existsSync(path.join(extensionsDir, 'git-workflow', 'extension.json')), true);
 
     const db = new Database(dbPath);
     try {
       const ownership = JSON.parse(db.prepare(`SELECT value FROM app_meta WHERE key = 'extensions.platform.ownership.v1'`).get().value);
-      assert.equal(ownership.domains.graphify.activeOwner, 'graphify');
+      assert.equal(ownership.domains.graphify.activeOwner, 'legacy');
       assert.equal(ownership.domains.git.activeOwner, 'git-workflow');
       const graphifyState = db.prepare(`
         SELECT value FROM extension_state
@@ -375,7 +375,7 @@ test('bundled integration migration resumes an interrupted ledger and survives r
         extensionsDir,
       });
       platform.prepare();
-      assert.equal(platform.owner('graphify'), 'graphify');
+      assert.equal(platform.owner('graphify'), 'legacy');
       assert.equal(platform.owner('git'), 'git-workflow');
     } finally {
       db.close();
@@ -415,7 +415,7 @@ test('bundled integration migration records failure ledger and falls back to leg
   }
 });
 
-test('completed migration is a no-op unless repair restores missing disabled outdated corrupt and unhealthy bundles', async () => {
+test('completed migration is a no-op and repair restores Git without installing Graphify', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-bundled-repair-'));
   const { dbPath } = makeBundledMigrationDb(tmp);
   const extensionsDir = path.join(tmp, 'extensions');
@@ -426,30 +426,31 @@ test('completed migration is a no-op unless repair restores missing disabled out
     const noOp = await updater.runBundledIntegrationMigration(options);
     assert.equal(noOp.alreadyCompleted, true);
 
-    fs.rmSync(path.join(extensionsDir, 'graphify'), { recursive: true, force: true });
-    let repaired = await updater.runBundledIntegrationMigration({ ...options, repair: true });
-    assert.equal(repaired.diagnostics.ownership.graphify.activeOwner, 'graphify');
-    assert.equal(fs.existsSync(path.join(extensionsDir, 'graphify', 'extension.json')), true);
+    fs.rmSync(path.join(extensionsDir, 'git-workflow'), { recursive: true, force: true });
+    const repaired = await updater.runBundledIntegrationMigration({ ...options, repair: true });
+    assert.equal(repaired.diagnostics.ownership.git.activeOwner, 'git-workflow');
+    assert.equal(fs.existsSync(path.join(extensionsDir, 'git-workflow', 'extension.json')), true);
+    assert.equal(fs.existsSync(path.join(extensionsDir, 'graphify')), false);
 
     const db = new Database(dbPath);
     const registryKey = 'extensions.platform.registry.v1';
-    const row = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(registryKey);
-    const registry = JSON.parse(row.value);
-    registry.extensions.graphify.enabled = false;
-    registry.extensions.graphify.unhealthyOwnership = { graphify: 'seeded readiness failure' };
+    const registry = JSON.parse(db.prepare('SELECT value FROM app_meta WHERE key = ?').get(registryKey).value);
+    registry.extensions['git-workflow'].enabled = false;
+    registry.extensions['git-workflow'].unhealthyOwnership = { git: 'seeded readiness failure' };
     db.prepare('UPDATE app_meta SET value = ? WHERE key = ?').run(JSON.stringify(registry), registryKey);
     db.close();
     const manifestPath = path.join(extensionsDir, 'git-workflow', 'extension.json');
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     manifest.version = '0.0.1';
     fs.writeFileSync(manifestPath, JSON.stringify(manifest));
-    fs.writeFileSync(path.join(extensionsDir, 'graphify', 'extension.json'), '{corrupt');
+    const upgraded = await updater.runBundledIntegrationMigration({ ...options, repair: true });
+    assert.equal(upgraded.diagnostics.catalog.find((item) => item.id === 'git-workflow').enabled, true);
+    assert.equal(upgraded.diagnostics.catalog.find((item) => item.id === 'git-workflow').installedVersion, '0.1.0');
+    fs.writeFileSync(manifestPath, '{corrupt');
+    const recovered = await updater.runBundledIntegrationMigration({ ...options, repair: true });
+    assert.equal(recovered.diagnostics.ownership.git.activeOwner, 'git-workflow');
+    assert.equal(fs.existsSync(path.join(extensionsDir, 'graphify')), false);
 
-    repaired = await updater.runBundledIntegrationMigration({ ...options, repair: true });
-    assert.equal(repaired.diagnostics.ownership.graphify.activeOwner, 'graphify');
-    assert.equal(repaired.diagnostics.ownership.git.activeOwner, 'git-workflow');
-    assert.equal(repaired.diagnostics.catalog.find((item) => item.id === 'graphify').enabled, true);
-    assert.equal(repaired.diagnostics.catalog.find((item) => item.id === 'git-workflow').installedVersion, '0.1.0');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -470,3 +471,43 @@ test('startup provenance preserves genuine first-install classification after sc
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+for (const enabled of [true, false]) {
+  test(`updates preserve an installed Graphify extension with enabled=${enabled}`, async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'control-center-graphify-optin-'));
+    const { dbPath } = makeBundledMigrationDb(tmp);
+    const extensionsDir = path.join(tmp, 'extensions');
+    const options = { root: ROOT, appHome: tmp, dbPath, extensionsDir };
+    try {
+      await updater.runBundledIntegrationMigration(options);
+      const db = new Database(dbPath);
+      const { ExtensionPlatform } = require('../lib/core/extensionPlatform');
+      const adapter = {
+        db,
+        getMetaValue(key, fallback = null) { return db.prepare('SELECT value FROM app_meta WHERE key = ?').get(key)?.value ?? fallback; },
+        setMetaValue(key, value) { db.prepare('INSERT INTO app_meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, String(value)); },
+      };
+      const platform = new ExtensionPlatform({ db: adapter, bundledDir: path.join(ROOT, 'bundled-extensions'), extensionsDir });
+      platform.prepare();
+      platform.installBundled('graphify', { enable: enabled });
+      if (enabled) platform.switchOwnership('graphify', 'graphify');
+      platform.shutdown();
+      // An older saved migration plan must not override an explicit user choice.
+      const key = 'updates.bundled_integration_migration.plan.v1';
+      const plan = JSON.parse(adapter.getMetaValue(key));
+      plan.targets.graphify.targetOwner = 'graphify';
+      plan.bundles.find((item) => item.id === 'graphify').enable = true;
+      adapter.setMetaValue(key, JSON.stringify(plan));
+      db.close();
+      const result = await updater.runBundledIntegrationMigration({ ...options, repair: true });
+      const status = result.diagnostics.catalog.find((item) => item.id === 'graphify');
+      assert.equal(status.installed, true);
+      assert.equal(status.enabled, enabled);
+      assert.equal(result.diagnostics.ownership.graphify.activeOwner, enabled ? 'graphify' : 'legacy');
+      const restart = await updater.runBundledIntegrationMigration(options);
+      assert.equal(restart.alreadyCompleted, true);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
