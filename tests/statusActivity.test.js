@@ -98,7 +98,7 @@ async function fetchTask(base, taskId) {
   return tasks.find((t) => t.id === taskId);
 }
 
-test('Codex Stop reaches needs-attention, typing preserves it, and submitting resumes running', async () => {
+test('Codex Stop and interruption reach needs-attention; subsequent prompts resume running', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-dashboard-status-'));
   const workspace = path.join(tmp, 'workspace');
   const project = path.join(workspace, 'project');
@@ -107,6 +107,8 @@ test('Codex Stop reaches needs-attention, typing preserves it, and submitting re
   const fakeCodex = path.join(tmp, 'fake-codex.js');
   fs.mkdirSync(project, { recursive: true });
   fs.mkdirSync(codexHome, { recursive: true });
+  const rollout = path.join(tmp, 'rollout.jsonl');
+  fs.writeFileSync(rollout, '');
   writeFakeCodex(fakeCodex);
 
   const db = loadDb(dbPath);
@@ -191,6 +193,26 @@ test('Codex Stop reaches needs-attention, typing preserves it, and submitting re
 
     await hook('UserPromptSubmit', { session_id: 'sess-1' });
     assert.equal((await fetchTask(base, task.id)).displayStatus, 'running');
+
+    await hook('SessionStart', { session_id: 'sess-1', transcript_path: rollout, cwd: project });
+    await hook('UserPromptSubmit', { session_id: 'sess-1' });
+    // Escape does not emit Stop. The provider writes an interruption record
+    // while its interactive process stays alive.
+    fs.appendFileSync(rollout, JSON.stringify({ timestamp: new Date().toISOString(),
+      type: 'event_msg', payload: { type: 'turn_aborted', reason: 'interrupted' } }) + '\n');
+    const interruptDeadline = Date.now() + 3000;
+    do {
+      listed = await fetchTask(base, task.id);
+      if (listed.displayStatus === 'needs_attention') break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    } while (Date.now() < interruptDeadline);
+    assert.equal(listed.displayStatus, 'needs_attention');
+    assert.equal(listed.activity, 'idle');
+    assert.equal(listed.status, 'in_progress');
+    assert.equal(listed.live, true);
+    await hook('UserPromptSubmit', { session_id: 'sess-1' });
+    await new Promise(resolve => setTimeout(resolve, 700));
+    assert.equal((await fetchTask(base, task.id)).displayStatus, 'running', 'old interruption must not override a newer prompt');
 
     ws.close();
     await Promise.race([once(ws, 'close'), new Promise((resolve) => setTimeout(resolve, 500))]);
