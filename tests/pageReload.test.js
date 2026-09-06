@@ -21,11 +21,12 @@ async function freePort() {
   return port;
 }
 
-test('page bootstrap restores provider configuration without invoking slow CLI diagnostics', async (t) => {
+async function checkStartupDiagnostics(t, stalledVersion) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-reload-'));
   const marker = path.join(tmp, 'doctor-called');
+  const versionMarker = path.join(tmp, 'version-called');
   const cli = path.join(tmp, 'codex');
-  fs.writeFileSync(cli, '#!/bin/sh\nif [ "$1" = "doctor" ]; then\n  touch "$CC_TEST_DOCTOR_MARKER"\n  sleep 1\n  echo \'{"checks":{"auth.credentials":{"status":"ok"}}}\'\nelse\n  echo codex-test\nfi\n', { mode: 0o755 });
+  fs.writeFileSync(cli, '#!/bin/sh\nif [ "$1" = "--version" ]; then\n  touch "$CC_TEST_VERSION_MARKER"\n  if [ "$CC_TEST_STALL_VERSION" != "true" ]; then echo codex-test; exit 0; fi\n  trap "" TERM\n  while :; do :; done\nfi\nif [ "$1" = "doctor" ]; then\n  touch "$CC_TEST_DOCTOR_MARKER"\n  sleep 1\n  echo \'{"checks":{"auth.credentials":{"status":"ok"}}}\'\nelse\n  echo codex-test\nfi\n', { mode: 0o755 });
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ['server.js'], {
@@ -33,9 +34,12 @@ test('page bootstrap restores provider configuration without invoking slow CLI d
     env: { ...process.env, PORT: String(port), CONTROL_CENTER_HOME: tmp,
       CC_DB_PATH: path.join(tmp, 'data', 'tasks.db'), CC_WORKSPACE_ROOT: tmp,
       CODEX_HOME: path.join(tmp, 'codex-home'), CC_CODEX_BIN: cli,
-      CC_TEST_DOCTOR_MARKER: marker, CC_GRAPHIFY_ENABLED: 'false', CC_GRAPHIFY_WATCH: 'false' },
-    stdio: ['ignore', 'ignore', 'pipe'],
+      CC_TEST_DOCTOR_MARKER: marker, CC_TEST_VERSION_MARKER: versionMarker,
+      CC_TEST_STALL_VERSION: String(stalledVersion), CC_GRAPHIFY_ENABLED: 'false', CC_GRAPHIFY_WATCH: 'false' },
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+  let output = '';
+  child.stdout.on('data', (chunk) => { output += chunk; });
   let errors = '';
   child.stderr.on('data', (chunk) => { errors += chunk; });
   t.after(async () => {
@@ -74,10 +78,25 @@ test('page bootstrap restores provider configuration without invoking slow CLI d
   assert.equal(ready.status, 200);
   assert.equal(await ready.text(), 'control-center\n');
   assert.equal(fs.existsSync(marker), false, 'readiness must not run CLI diagnostics');
-  const health = await (await fetch(`${base}/api/health`)).json();
+  while (!output.includes('  db:') && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(output.includes('  db:'), 'startup banner must finish');
+  assert.equal(fs.existsSync(versionMarker), false, 'startup must not probe the CLI version');
+  const tasks = await fetch(`${base}/api/tasks`, { signal: AbortSignal.timeout(1000) });
+  assert.equal(tasks.status, 200);
+  assert.deepEqual(await tasks.json(), []);
+  const health = await (await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(5000) })).json();
+  assert.equal(health.codexVersion, stalledVersion ? null : 'codex-test');
+  assert.equal(fs.existsSync(versionMarker), true, 'health exercises the version fixture');
   assert.equal(fs.existsSync(marker), true, 'fixture must exercise real diagnostics on health');
   assert.equal(health.codexAuthConfigured, true, 'existing diagnostic contract is preserved');
-});
+}
+
+for (const stalledVersion of [false, true]) {
+  test(`startup and page bootstrap skip CLI diagnostics (stalled version: ${stalledVersion})`,
+    (t) => checkStartupDiagnostics(t, stalledVersion));
+}
 
 test('startup fetches concurrently but restores tasks and tabs after projects and extensions', async () => {
   const app = fs.readFileSync(path.join(ROOT, 'public/app.js'), 'utf8');

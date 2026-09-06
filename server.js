@@ -1914,13 +1914,13 @@ async function startServer() {
   }
   extensionPlatform.reconcileOwnership(extensionManager.extensions);
   const caff = caffeinateStatus();
-  const v = codex.codexVersion() || 'NOT FOUND on PATH';
   /* eslint-disable no-console */
   console.log(`\n  Control Center`);
   console.log(`  → http://${HOST}:${PORT}`);
   console.log(`  workspace: ${WORKSPACE_ROOT}  (tasks can target any folder here)`);
   console.log(`  permissions: ${YOLO ? 'YOLO — build sessions bypass approvals and sandbox (CC_SKIP_PERMISSIONS=false to disable)' : 'normal (workspace-write, on-request)'}`);
-  console.log(`  codex: ${codex.CODEX_BIN} (${v})`);
+  // Startup logging must not run CLI diagnostics on the HTTP event loop.
+  console.log(`  codex: ${codex.CODEX_BIN}`);
   console.log(`  hooks: inline .codex-dashboard hooks`);
   console.log(`  caffeinate: ${caff.enabled ? (caff.active ? `active (pid ${caff.pid})` : (caff.error || 'enabled')) : 'off'}`);
   console.log(`  db: ${db.DB_PATH}`);
