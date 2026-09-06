@@ -22,6 +22,9 @@
   function contributionList(kind, slot) {
     const out = [];
     for (const extension of enabledExtensions()) {
+      const ownership = payload.platform && payload.platform.ownership;
+      if (asArray(extension.ownership).some((domain) =>
+        !ownership || !ownership[domain] || ownership[domain].activeOwner !== extension.id)) continue;
       const contributes = extension.contributes || {};
       for (const contribution of asArray(contributes[kind])) {
         if (slot && contribution.slot !== slot && contribution.mount !== slot) continue;

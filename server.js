@@ -131,6 +131,7 @@ function refreshExtensionManager(opts = {}) {
   extensionPlatform.prepare();
   extensionManager = loadExtensions({
     app: opts.mountRoutes ? app : undefined,
+    activationApp: app,
     extensionsDir: paths.EXTENSIONS_DIR,
     context: { db, paths, workspaceRoot: WORKSPACE_ROOT },
     platform: extensionPlatform,
@@ -492,12 +493,12 @@ function extensionInstallPayload(installed) {
   };
 }
 
-function extensionPlatformPayload(extension, { refresh = true } = {}) {
+function extensionPlatformPayload(extension, { refresh = true, restartRequired = true } = {}) {
   const manager = refresh ? refreshExtensionManager() : extensionManager;
   return {
     ok: true,
     extension,
-    restartRequired: true,
+    restartRequired,
     extensions: manager.publicPayload(),
   };
 }
@@ -509,12 +510,20 @@ function extensionPlatformError(res, error) {
   });
 }
 
+function activateGitWorkflow(extension) {
+  if (extension.id !== 'git-workflow' || !extensionPlatform.isEnabled(extension.id)) return false;
+  extensionManager.activate(extension.id);
+  extensionPlatform.switchOwnership('git', extension.id);
+  return true;
+}
+
 app.post('/api/extensions/bundled/:extensionId/install', (req, res) => {
   try {
     const extension = extensionPlatform.installBundled(req.params.extensionId, {
       enable: !!(req.body && req.body.enable),
     });
-    res.status(201).json(extensionPlatformPayload(extension));
+    const activated = activateGitWorkflow(extension);
+    res.status(201).json(extensionPlatformPayload(extension, { refresh: !activated, restartRequired: !activated }));
   } catch (e) {
     extensionPlatformError(res, e);
   }
@@ -538,7 +547,9 @@ app.post('/api/extensions/bundled/:extensionId/rollback', (req, res) => {
 
 app.post('/api/extensions/:extensionId/enable', (req, res) => {
   try {
-    res.json(extensionPlatformPayload(extensionPlatform.enable(req.params.extensionId)));
+    const extension = extensionPlatform.enable(req.params.extensionId);
+    const activated = activateGitWorkflow(extension);
+    res.json(extensionPlatformPayload(extension, { refresh: !activated, restartRequired: !activated }));
   } catch (e) {
     extensionPlatformError(res, e);
   }

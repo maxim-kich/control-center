@@ -3155,11 +3155,11 @@ async function changeBundledExtension(id, action) {
     const route = action === 'install' || action === 'upgrade'
       ? `/api/extensions/bundled/${id}/${action}`
       : `/api/extensions/${id}/${action}`;
-    await api.send('POST', route, action === 'install' ? { enable: true } : {});
+    const result = await api.send('POST', route, action === 'install' ? { enable: true } : {});
     if (id === 'graphify' && (action === 'install' || action === 'enable')) {
       await api.send('PUT', '/api/extensions/ownership/graphify', { owner: 'graphify' });
     }
-    toast('Extension updated. Restart Control Center to apply.');
+    toast(result.restartRequired === false ? 'Extension updated.' : 'Extension updated. Restart Control Center to apply.');
   } catch (e) {
     toast(e.message, { err: true });
   } finally {
