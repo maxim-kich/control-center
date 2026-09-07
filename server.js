@@ -32,7 +32,7 @@ const db = require('./lib/db');
 const codex = require('./lib/codex');
 const { graphifyProjectInfo } = require('./lib/graphify');
 const { autoCommitTaskProject } = require('./lib/gitAutoCommit');
-const { hasProjectGit, projectGitApiFields, clearProjectGitCache } = require('./lib/gitRoots');
+const { hasProjectGit, projectGitApiFieldsAsync, clearProjectGitCache } = require('./lib/gitRoots');
 const { buildHookArgs } = require('./lib/hooksSettings');
 const { checkHookTrust, reviewEnv } = require('./lib/hookTrust');
 const { ensureSpawnHelper } = require('./lib/ensurePty');
@@ -1051,7 +1051,7 @@ async function projectsWithStats() {
     const project = {
       ...p,
       ...graphify,
-      ...projectGitApiFields(p.path),
+      ...await projectGitApiFieldsAsync(p.path),
       graphify_status: p.graphify_enabled === 0
         ? 'disabled'
         : graphify.graphify_external_running

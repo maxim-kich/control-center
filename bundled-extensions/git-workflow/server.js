@@ -15,10 +15,10 @@ function projectFromContext(context) {
   return null;
 }
 
-function importState(project, values) {
+async function importState(project, values) {
   if (!runtime || !runtime.db || typeof runtime.db.setExtensionState !== 'function' || !project) return;
   runtime.db.setExtensionState(runtime.extensionId, 'project', project.id, {
-    git: runtime.projectGitApiFields(project.path),
+    git: await runtime.projectGitApiFields(project.path),
     ...(values || {}),
   });
 }
@@ -27,13 +27,13 @@ async function initProject(project, api) {
   if (!active(api)) return { skipped: 'inactive_owner', activeOwner: api.ownership && api.ownership.activeOwner('git') };
   if (!project) return { ok: false, error: 'project not found' };
   const result = await api.git.init(project.path, { ownership: 'git' });
-  importState(project, {
+  await importState(project, {
     lastInit: {
       ...result,
       at: runtime.db.now ? runtime.db.now() : new Date().toISOString(),
     },
   });
-  return { ok: true, init: result, git: runtime.projectGitApiFields(project.path) };
+  return { ok: true, init: result, git: await runtime.projectGitApiFields(project.path) };
 }
 
 exports.register = ({ express, db, paths, extension, capabilities }) => {
@@ -42,7 +42,7 @@ exports.register = ({ express, db, paths, extension, capabilities }) => {
   runtime = {
     db,
     extensionId: extension.id,
-    projectGitApiFields: gitRoots.projectGitApiFields,
+    projectGitApiFields: gitRoots.projectGitApiFieldsAsync,
   };
 
   capabilities.health.register('readiness', () => {
@@ -55,10 +55,10 @@ exports.register = ({ express, db, paths, extension, capabilities }) => {
   });
 
   const router = express.Router();
-  router.get('/projects/:id/status', (req, res) => {
+  router.get('/projects/:id/status', async (req, res) => {
     const project = db.getProject(req.params.id);
     if (!project) return res.status(404).json({ error: 'not found' });
-    res.json({ git: runtime.projectGitApiFields(project.path), owner: capabilities.ownership.activeOwner('git') });
+    res.json({ git: await runtime.projectGitApiFields(project.path), owner: capabilities.ownership.activeOwner('git') });
   });
   router.post('/projects/:id/init', async (req, res) => {
     if (!active(capabilities)) return res.status(409).json({ error: 'Git Workflow extension is not the active owner' });
@@ -78,15 +78,15 @@ exports.hooks = {
     if (!active(api)) return { skipped: 'inactive_owner' };
     if (context && context.reason === 'git-init-requested') return initProject(projectFromContext(context), api);
     const project = projectFromContext(context);
-    if (project) importState(project);
+    if (project) await importState(project);
     return { ok: true };
   },
 
-  'project.metadata'(context, api) {
+  async 'project.metadata'(context, api) {
     const project = projectFromContext(context);
     if (!project) return {};
-    const git = runtime.projectGitApiFields(project.path);
-    if (active(api)) importState(project, { lastSeenAt: runtime.db.now ? runtime.db.now() : new Date().toISOString() });
+    const git = await runtime.projectGitApiFields(project.path);
+    if (active(api)) await importState(project, { lastSeenAt: runtime.db.now ? runtime.db.now() : new Date().toISOString() });
     return git;
   },
 
@@ -111,7 +111,7 @@ exports.hooks = {
       const gitCommit = await api.git.commitTask(context.task, opts);
       const project = projectFromContext(context);
       if (project) {
-        importState(project, {
+        await importState(project, {
           lastCommit: {
             taskId: context.task.id,
             result: gitCommit,

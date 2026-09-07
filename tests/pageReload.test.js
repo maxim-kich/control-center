@@ -9,7 +9,7 @@ const net = require('node:net');
 const vm = require('node:vm');
 const { spawn, execFileSync } = require('node:child_process');
 const { once } = require('node:events');
-const { projectGitApiFields, clearProjectGitCache } = require('../lib/gitRoots');
+const { projectGitApiFieldsAsync, clearProjectGitCache } = require('../lib/gitRoots');
 const ROOT = path.resolve(__dirname, '..');
 
 async function freePort() {
@@ -134,20 +134,165 @@ test('startup fetches concurrently but restores tasks and tabs after projects an
   await result;
 });
 
-test('Git metadata cache returns copies, expires, and detects repository creation', (t) => {
+test('Git metadata cache returns copies, expires, and detects repository creation', async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-git-cache-'));
   t.after(() => { clearProjectGitCache(); fs.rmSync(tmp, { recursive: true, force: true }); });
   clearProjectGitCache();
-  assert.equal(projectGitApiFields(tmp).git_initialized, 0);
+  assert.equal((await projectGitApiFieldsAsync(tmp)).git_initialized, 0);
   execFileSync('git', ['init', '-q', tmp]);
-  const fields = projectGitApiFields(tmp);
+  const fields = await projectGitApiFieldsAsync(tmp);
   assert.equal(fields.git_initialized, 1);
   fields.git_repo_root = 'modified by consumer';
-  assert.equal(projectGitApiFields(tmp).git_repo_root, fs.realpathSync(tmp));
+  assert.equal((await projectGitApiFieldsAsync(tmp)).git_repo_root, fs.realpathSync(tmp));
   const originalNow = Date.now;
   t.mock.method(Date, 'now', () => originalNow() + 6000);
-  assert.equal(projectGitApiFields(tmp).git_initialized, 1);
+  assert.equal((await projectGitApiFieldsAsync(tmp)).git_initialized, 1);
   clearProjectGitCache();
   fs.rmSync(path.join(tmp, '.git'), { recursive: true });
-  assert.equal(projectGitApiFields(tmp).git_initialized, 0);
+  assert.equal((await projectGitApiFieldsAsync(tmp)).git_initialized, 0);
+});
+
+test('slow project Git probes leave readiness and bootstrap responsive after cache expiry', { timeout: 30000 }, async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-slow-git-'));
+  const bin = path.join(tmp, 'bin');
+  fs.mkdirSync(bin);
+  const marker = path.join(tmp, 'git-calls');
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(path.join(bin, 'git'), `#!${process.execPath}
+const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
+if (process.argv[2] === 'rev-parse') fs.appendFileSync(process.env.CC_TEST_GIT_MARKER, 'probe\\n');
+setTimeout(() => {
+  const result = spawnSync(process.env.CC_TEST_REAL_GIT, process.argv.slice(2), { stdio: 'inherit' });
+  process.exit(result.status ?? 1);
+}, 400);
+`, { mode: 0o755 });
+  const own = path.join(tmp, 'own');
+  const parent = path.join(tmp, 'parent');
+  const nested = path.join(parent, 'nested');
+  const none = path.join(tmp, 'none');
+  for (const dir of [own, nested, none]) fs.mkdirSync(dir, { recursive: true });
+  for (const dir of [own, parent]) execFileSync(realGit, ['init', '-q', dir]);
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ['server.js'], {
+    cwd: ROOT,
+    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, PORT: String(port),
+      CONTROL_CENTER_HOME: tmp, CC_DB_PATH: path.join(tmp, 'data', 'tasks.db'),
+      CC_WORKSPACE_ROOT: tmp, CODEX_HOME: path.join(tmp, 'codex-home'),
+      CC_GRAPHIFY_ENABLED: 'false', CC_GRAPHIFY_WATCH: 'false',
+      CC_TEST_GIT_MARKER: marker, CC_TEST_REAL_GIT: realGit },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  let errors = '';
+  child.stderr.on('data', (chunk) => { errors += chunk; });
+  t.after(async () => {
+    if (child.exitCode == null) {
+      const exited = once(child, 'exit');
+      child.kill('SIGTERM');
+      const timer = setTimeout(() => child.kill('SIGKILL'), 7000);
+      await exited;
+      clearTimeout(timer);
+    }
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+  const deadline = Date.now() + 15000;
+  let ready = false;
+  while (Date.now() < deadline) {
+    assert.equal(child.exitCode, null, errors);
+    try {
+      ready = (await fetch(`${base}/api/ready`, { signal: AbortSignal.timeout(500) })).ok;
+      if (ready) break;
+    } catch { /* waiting for startup */ }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.ok(ready, errors);
+  for (const dir of [own, nested, none]) {
+    const response = await fetch(`${base}/api/projects`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: dir, graphify_enabled: false }) });
+    assert.equal(response.status, 201, await response.text());
+  }
+  const calls = () => fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8').trim().split('\n').length : 0;
+  for (const phase of ['cold', 'expired']) {
+    if (phase === 'expired') await new Promise((resolve) => setTimeout(resolve, 5100));
+    const before = calls();
+    let finished = false;
+    const started = performance.now();
+    const projectsRequest = fetch(`${base}/api/projects`).then(async (response) => {
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      finished = true;
+      return body.projects;
+    });
+    const probeDeadline = Date.now() + 3000;
+    while (calls() === before && Date.now() < probeDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(calls() > before, 'delayed Git fixture must be running');
+    const concurrentRequest = fetch(`${base}/api/projects`).then((response) => response.json());
+    const timings = {};
+    for (const endpoint of ['ready', 'bootstrap']) {
+      const start = performance.now();
+      const response = await fetch(`${base}/api/${endpoint}`, { signal: AbortSignal.timeout(800) });
+      assert.equal(response.status, 200);
+      await response.text();
+      timings[endpoint] = Math.round(performance.now() - start);
+      assert.equal(finished, false, `${endpoint} must finish while Git metadata is pending`);
+    }
+    const projects = await projectsRequest;
+    assert.deepEqual((await concurrentRequest).projects, projects);
+    const projectMs = Math.round(performance.now() - started);
+    assert.equal(calls() - before, 3, 'overlapping requests share one probe per project');
+    const byPath = new Map(projects.map((project) => [project.path, project]));
+    assert.equal(byPath.get(own).git_repo_kind, 'own');
+    assert.equal(byPath.get(own).git_repo_root, fs.realpathSync(own));
+    assert.equal(byPath.get(nested).git_repo_kind, 'parent');
+    assert.equal(byPath.get(nested).git_parent_repo_root, fs.realpathSync(parent));
+    assert.match(byPath.get(nested).git_warning, /will not run project Git operations/);
+    assert.equal(byPath.get(none).git_repo_kind, 'none');
+    const cachedStart = performance.now();
+    const cached = await (await fetch(`${base}/api/projects`)).json();
+    assert.deepEqual(cached.projects, projects);
+    assert.equal(calls() - before, 3, 'warm requests do not spawn Git');
+    t.diagnostic(`${phase}: projects=${projectMs}ms ready=${timings.ready}ms bootstrap=${timings.bootstrap}ms cached=${Math.round(performance.now() - cachedStart)}ms`);
+  }
+});
+
+test('invalidating pending Git metadata prevents stale cache writes and failures fall back safely', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-git-inflight-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const probes = [];
+  const context = {
+    require(name) {
+      if (name === 'child_process') return {
+        execFile(command, args, options, callback) { probes.push(callback); },
+      };
+      return require(name);
+    },
+    module: { exports: {} },
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'lib/gitRoots.js'), 'utf8'), context);
+  const api = context.module.exports;
+  const stale = api.projectGitApiFieldsAsync(tmp);
+  const shared = api.projectGitApiFieldsAsync(tmp);
+  assert.equal(probes.length, 1);
+  api.clearProjectGitCache();
+  const fresh = api.projectGitApiFieldsAsync(tmp);
+  assert.equal(probes.length, 2);
+  probes[1](new Error('Git failed or timed out'), '');
+  assert.equal((await fresh).git_repo_kind, 'none');
+  probes[0](null, path.dirname(tmp));
+  assert.equal((await stale).git_repo_kind, 'parent');
+  const sharedFields = await shared;
+  sharedFields.git_repo_kind = 'consumer mutation';
+  assert.equal((await stale).git_repo_kind, 'parent');
+  assert.equal((await api.projectGitApiFieldsAsync(tmp)).git_repo_kind, 'none', 'old probe cannot replace fresh cache');
+  assert.equal(probes.length, 2);
+  fs.mkdirSync(path.join(tmp, '.git'));
+  const own = api.projectGitApiFieldsAsync(tmp);
+  assert.equal(probes.length, 3, 'repository creation bypasses cached absence');
+  probes[2](new Error('Git failed or timed out'), '');
+  assert.equal((await own).git_repo_kind, 'own');
+  assert.equal((await own).git_repo_root, tmp);
 });
